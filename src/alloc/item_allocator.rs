@@ -1,26 +1,20 @@
-use core::{
-  mem::MaybeUninit, ops::{Deref, DerefMut}, ptr::NonNull
-};
+use core::mem::MaybeUninit;
 
-use zerocopy::FromZeros;
-
-pub trait Strategy {
-  type Data; // stored in allocation
-  type Handle<T>: StrategyHandle<T>; // reference to allocation
-}
-
-trait StrategyHandle<T>: Deref<Target = T> {}
+use super::Strategy;
 
 pub trait ItemAllocator<T, S: Strategy> {
   type AllocateError;
 
-  async fn take<'allocator>(&'allocator self, value: T) -> Result<S::Handle<T>, Self::AllocateError>
+  async fn take<'allocator>(&'allocator self, value: T) -> Result<S::Handle<'allocator, T>, Self::AllocateError>
   where
-    S::Handle<T>: 'allocator;
+    T: 'allocator;
 
-  async fn reserve<'allocator>(&'allocator self, value: T) -> Result<S::Handle<MaybeUninit<T>>, Self::AllocateError>
+  async fn reserve<'allocator>(
+    &'allocator self,
+    value: T,
+  ) -> Result<S::Handle<'allocator, MaybeUninit<T>>, Self::AllocateError>
   where
-    S::Handle<T>: 'allocator;
+    T: 'allocator;
 }
 
 // #[cfg(test)]

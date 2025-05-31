@@ -28,6 +28,7 @@
           devShells.default = mkShell rec {
             buildInputs = [
               pkgs.fenix.complete.toolchain
+              lldb
             ];
           };
         }
