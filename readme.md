@@ -6,11 +6,11 @@ a standard library alternative
 - questions
   - realloc?
   - should handles always be smart pointers?
-- handle reserving slice dst structs in the dst allocator
-  - zerocopy is quite useful for this
 - require drop impl on handles
 - handling frees when coercepointee only allows one field (transparent)
-  - how does alloc::boxed::Box handle storing its allocator?
+  - ~~how does alloc::boxed::Box handle storing its allocator?~~
+  - solved by `FreeVtable` unfortunately
+  - need to figure out implementing dyn dispatch for non pointer sized types
 - create and test implementations of all allocator types
   - page allocator
   - c allocator
