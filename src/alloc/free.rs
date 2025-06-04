@@ -28,8 +28,8 @@ impl<'allocator> FreeVtable<'allocator> {
   /// 
   /// An example of a [StrategyHandle](super::StrategyHandle)-like type holding allocation data and its respective 
   /// ```
-  /// # use std::ptr::{NonNull, addr_of_mut};
-  /// use aubystd::alloc::free::FreeVtable;
+  /// use core::ptr::NonNull;
+  /// use aubystd::alloc::FreeVtable;
   /// 
   /// struct ExampleData<'a, T: ?Sized> {
   ///   free_vtable: FreeVtable<'a>,
@@ -43,7 +43,7 @@ impl<'allocator> FreeVtable<'allocator> {
   ///     // Here we read the value in order to get a copy and call free.
   ///     // The reason we don't get a reference to free_vtable is because the allocator expects
   ///     // full ownership over the data in the allocator, which the vtable resides in.
-  ///     unsafe { addr_of_mut!((*self.0.as_ptr()).free_vtable).read().free(self.0) };
+  ///     unsafe { (&raw mut (*self.0.as_ptr()).free_vtable).read().free(self.0) };
   ///   }
   /// }
   /// ```

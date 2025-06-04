@@ -1,10 +1,8 @@
-use core::{
-  mem::MaybeUninit, ptr::Pointee
-};
+use core::{iter::TrustedLen, mem::MaybeUninit};
 
 use zerocopy::FromZeros;
 
-use super::strategy::Strategy;
+use super::{SliceDst, Strategy, UnsizedMaybeUninit};
 
 pub trait Allocator<S: Strategy> {
   type AllocateError;
@@ -21,42 +19,22 @@ pub trait Allocator<S: Strategy> {
 
   async fn take_from_iter<'allocator, T: SliceDst + ?Sized + 'allocator>(
     &'allocator self,
-    iterator: impl ExactSizeIterator<Item = T::Element>,
+    iterator: impl TrustedLen<Item = T::Element>,
   ) -> Result<S::Handle<'allocator, T>, Self::AllocateError>;
 
-  async fn take_from_zeros<'allocator, T: SliceDst + ?Sized + 'allocator>(
+  async fn take_from_zeros<'allocator, T: SliceDst + FromZeros + ?Sized + 'allocator>(
     &'allocator self,
     element_count: usize,
   ) -> Result<S::Handle<'allocator, T>, Self::AllocateError>
   where
-    T::Element: FromZeros; // T::Header is always FromZeros.
+    T::Element: FromZeros;
 
   async fn reserve_item<'allocator, T: 'allocator>(
     &'allocator self,
-    value: T,
   ) -> Result<S::Handle<'allocator, MaybeUninit<T>>, Self::AllocateError>;
 
   async fn reserve_dst<'allocator, T: SliceDst + ?Sized + 'allocator>(
     &'allocator self,
     element_count: usize,
-  ) -> Result<S::Handle<'allocator, T>, Self::AllocateError> {
-    let _ = element_count;
-    todo!("MaybeUninit<T> for unsized types")
-  }
-}
-
-pub trait SliceDst: Pointee<Metadata = usize> {
-  type Header: FromZeros;
-  type Element;
-
-  fn addr_of_elements(ptr: *mut Self) -> *mut [Self::Element];
-}
-
-impl<T> SliceDst for [T] {
-  type Header = ();
-  type Element = T;
-
-  fn addr_of_elements(ptr: *mut Self) -> *mut [Self::Element] {
-    ptr
-  }
+  ) -> Result<S::Handle<'allocator, UnsizedMaybeUninit<T>>, Self::AllocateError>;
 }

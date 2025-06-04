@@ -2,7 +2,7 @@ pub mod unique;
 
 use core::ptr::{NonNull, Pointee};
 
-use super::{unsized_allocator::SliceDst, free::FreeVtable};
+use super::{FreeVtable, SliceDst};
 
 pub trait Strategy {
   // Data types *must* be repr(C).
@@ -30,7 +30,9 @@ pub trait Strategy {
 }
 
 pub trait StrategyHandle<T: ?Sized>: Sized {
-  fn as_ptr(&self) -> NonNull<T>;
+  type Cast<'allocator, U: ?Sized + 'allocator>: StrategyHandle<U>;
+
+  fn as_ptr(&self) -> *mut T;
   fn into_strategy_data_ptr(self) -> StrategyDataPtr<T>;
   unsafe fn from_strategy_data_ptr(ptr: StrategyDataPtr<T>) -> Self;
 }
@@ -40,4 +42,13 @@ pub trait StrategyHandle<T: ?Sized>: Sized {
 ///
 /// The reason for this type's existence is the generics issues of passing [Strategy::Data] into [Strategy::Handle] for
 /// [StrategyHandle::into_strategy_data_ptr] and [StrategyHandle::from_strategy_data_ptr].
-pub struct StrategyDataPtr<T: ?Sized>(pub NonNull<T>);
+pub struct StrategyDataPtr<T: ?Sized> {
+  pub strategy_data: NonNull<()>,
+  pub value: *mut T,
+}
+
+pub trait UninitStrategyHandleExt<T: ?Sized>: StrategyHandle<T> {
+  type Init;
+
+  unsafe fn assume_init(self) -> Self::Init;
+}

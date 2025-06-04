@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+aubystd-macros = { version = "0.1.0", path = "macros" }
 zerocopy = { version = "0.8.25", features = ["derive"] }
 
 [dev-dependencies]
@@ -12,4 +13,4 @@ thiserror = "2.0.12"
 
 [workspace]
 resolver = "3"
-members = ["macros"]
+members = ["macros", "scratchpad"]

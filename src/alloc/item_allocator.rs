@@ -1,8 +1,8 @@
 use core::mem::MaybeUninit;
 
-use super::strategy::Strategy;
+use super::Strategy;
 
-pub trait ArenaAllocator<T, S: Strategy> {
+pub trait ItemAllocator<T, S: Strategy> {
   type AllocateError;
 
   async fn take<'allocator>(&'allocator self, value: T) -> Result<S::Handle<'allocator, T>, Self::AllocateError>
@@ -26,13 +26,13 @@ mod testing {
   use thiserror::Error;
   use zerocopy::FromZeros;
 
-  use super::{ItemAllocator};
+  use super::ItemAllocator;
 
   #[derive(Debug, Error)]
   #[error("ran out of memory!")]
   struct OutOfMemory;
   struct SingleItemAllocator(RefCell<Option<&'static UnsafeCell<i32>>>);
-  impl ArenaAllocator<i32> for SingleItemAllocator {
+  impl ItemAllocator<i32> for SingleItemAllocator {
     type AllocateError = OutOfMemory;
     type Box<'a> = ExampleHandle<'a>;
     fn allocate<'allocator>(&'allocator self) -> Result<Self::Box<'allocator>, Self::AllocateError>
