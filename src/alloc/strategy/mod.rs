@@ -5,7 +5,6 @@ use core::ptr::{NonNull, Pointee};
 use super::{FreeVtable, SliceDst};
 
 pub trait Strategy {
-  // Data types *must* be repr(C).
   type SizedData<'allocator, T: 'allocator>; // stored in allocation
   type SliceData<'allocator, T: SliceDst + ?Sized + 'allocator>: ?Sized + Pointee<Metadata = usize>; // stored in allocation
   type Handle<'allocator, T: ?Sized + 'allocator>: StrategyHandle<T>; // reference to allocation

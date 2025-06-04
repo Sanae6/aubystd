@@ -199,9 +199,6 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
         }
         FieldsKind::Unnamed => {
           quote! {
-            #[derive(#crate_name::zerocopy::FromZeros)]
-            #[zerocopy(crate = "aubystd::zerocopy")]
-            // #repr
             struct #header_name #generics (#(#fields,)* <#last_ty as #crate_name::alloc::SliceDst>::Header);
           }
         }
