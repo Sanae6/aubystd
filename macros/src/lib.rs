@@ -1,7 +1,7 @@
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote};
 use syn::{
-  Attribute, DeriveInput, GenericParam, Ident, Lifetime, Visibility, parse_macro_input, parse_quote, token::Pub, visit::Visit
+  Attribute, DeriveInput, GenericParam, Ident, Lifetime, Visibility, parse_macro_input, parse_quote, spanned::Spanned, token::Pub, visit::Visit
 };
 
 fn find_crate_name(attrs: &[Attribute]) -> syn::Result<TokenStream> {
@@ -40,7 +40,7 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
   fn slice_dst_derive(
     DeriveInput {
       attrs,
-      vis: _,
+      vis,
       ident,
       mut generics,
       data,
@@ -50,6 +50,35 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
 
     let syn::Data::Struct(data_struct) = data else {
       return Err(syn::Error::new(ident.span(), "only structs are supported"));
+    };
+
+    let reprs = attrs
+      .iter()
+      .filter_map(|attr| {
+        if !attr.path().is_ident("repr") {
+          return None;
+        }
+
+        let mut repr = None;
+        let result = attr
+          .parse_nested_meta(|meta| {
+            if ["C", "transparent", "align", "packed"].iter().any(|ident| meta.path.is_ident(ident)) {
+              repr = Some(meta.path);
+              Ok(())
+            } else {
+              Err(syn::Error::new(meta.path.span(), "unsupported repr"))
+            }
+          })
+          .map(|_| repr.unwrap());
+        Some(result)
+      })
+      .collect::<syn::Result<Vec<_>>>()?;
+
+    if reprs.len() == 0 || reprs.iter().all(|path| !path.is_ident("C") && !path.is_ident("transparent")) {
+      return Err(syn::Error::new(
+        ident.span(),
+        "struct must be either repr(C) or repr(transparent)",
+      ));
     };
 
     enum FieldsKind {
@@ -119,12 +148,12 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
     let last_ty = last.ty;
 
     let header_name = match fields.len() {
-      2.. => quote!(Header),
-      1 => fields.clone().next().unwrap().ty.to_token_stream(),
+      1.. => Ident::new(&format!("{ident}Header"), Span::call_site()).to_token_stream(),
+      // 1 => fields.clone().next().unwrap().ty.to_token_stream(),
       0 => quote!(()),
     };
 
-    let header_assoc_generics = (fields.len() > 1 && generics.params.len() > 0).then_some({
+    let header_assoc_generics = (generics.params.len() > 0).then_some({
       let params = generics.params.iter().map(|param| match param {
         syn::GenericParam::Lifetime(lifetime_param) => lifetime_param.lifetime.to_token_stream(),
         syn::GenericParam::Type(type_param) => type_param.ident.to_token_stream(),
@@ -138,7 +167,7 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
       FieldsKind::Unnamed => last_index.to_token_stream(),
     };
 
-    let addr_of_slice = if fields.len() < 2 {
+    let addr_of_slice = if fields.len() < 1 {
       quote! {
         unsafe { &raw mut (*ptr).#last_ident }
       }
@@ -148,7 +177,7 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
       }
     };
 
-    let header = if fields.len() < 2 {
+    let header = if fields.len() < 1 {
       quote!()
     } else {
       let mut generics = generics.clone();
@@ -191,7 +220,8 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
         FieldsKind::Named => {
           let last_ident_header = Ident::new(&format!("{last_ident}_header"), Span::call_site());
           quote! {
-            struct #header_name #generics {
+            #(#[repr(#reprs)])*
+            #vis struct #header_name #generics {
               #(#fields,)*
               pub #last_ident_header: <#last_ty as #crate_name::alloc::SliceDst>::Header
             }
@@ -199,31 +229,25 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
         }
         FieldsKind::Unnamed => {
           quote! {
-            struct #header_name #generics (#(#fields,)* <#last_ty as #crate_name::alloc::SliceDst>::Header);
+            #vis struct #header_name #generics (#(#fields,)* <#last_ty as #crate_name::alloc::SliceDst>::Header);
           }
         }
       }
     };
 
-    let generics_str = generics.to_token_stream().to_string();
-
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     Ok(quote! {
-      const _: () = {
-        let _ = #generics_str;
-        #header
+      #header
 
-        impl #impl_generics #crate_name::alloc::SliceDst for #ident #ty_generics #where_clause {
-          type Header = #header_name #header_assoc_generics;
-          type Element = <#last_ty as #crate_name::alloc::SliceDst>::Element;
+      unsafe impl #impl_generics #crate_name::alloc::SliceDst for #ident #ty_generics #where_clause {
+        type Header = #header_name #header_assoc_generics;
+        type Element = <#last_ty as #crate_name::alloc::SliceDst>::Element;
 
-          fn addr_of_slice(ptr: *mut Self) -> *mut [Self::Element] {
-            #addr_of_slice
-          }
+        fn addr_of_slice(ptr: *mut Self) -> *mut [Self::Element] {
+          #addr_of_slice
         }
-      };
-
+      }
     })
   }
 

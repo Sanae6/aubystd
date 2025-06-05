@@ -9,6 +9,9 @@
 #![feature(more_maybe_bounds)]
 #![feature(trusted_len)]
 #![feature(prelude_import)]
+#![feature(never_type)]
+#![feature(layout_for_ptr)]
+
 
 pub mod alloc;
 pub use zerocopy;

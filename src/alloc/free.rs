@@ -1,13 +1,13 @@
-use core::{marker::{variance, PhantomInvariantLifetime}, ptr::{null_mut, NonNull}};
+use core::{alloc::Layout, marker::{variance, PhantomInvariantLifetime}, ptr::{null_mut, NonNull}};
 
 pub struct FreeVtable<'allocator> {
-  free_fn: unsafe fn(context: *mut (), allocation: *mut ()),
+  free_fn: unsafe fn(context: *mut (), allocation: *mut (), layout: Layout),
   context: *mut (),
   lifetime: PhantomInvariantLifetime<'allocator>,
 }
 
 impl<'allocator> FreeVtable<'allocator> {
-  pub fn new<C: ?Sized>(free_fn: unsafe fn(context: *mut (), allocation: *mut ()), context: *mut C) -> Self {
+  pub fn new<C: ?Sized>(free_fn: unsafe fn(context: *mut (), allocation: *mut (), layout: Layout), context: *mut C) -> Self {
     Self {
       free_fn: free_fn,
       context: context as _,
@@ -17,7 +17,7 @@ impl<'allocator> FreeVtable<'allocator> {
 
   pub const fn new_empty() -> Self {
     Self {
-      free_fn: |_, _| {},
+      free_fn: |_, _, _| {},
       context: null_mut(),
       lifetime: variance(),
     }
@@ -47,8 +47,8 @@ impl<'allocator> FreeVtable<'allocator> {
   ///   }
   /// }
   /// ```
-  pub unsafe fn free<A: ?Sized>(self, allocation: NonNull<A>) {
+  pub unsafe fn free<A: ?Sized>(self, allocation: NonNull<A>, layout: Layout) {
     // Safety: The context and caller-provided allocation passed to the free function are expected to be what the function expects.
-    unsafe { (self.free_fn)(self.context, allocation.as_ptr() as *mut _) }
+    unsafe { (self.free_fn)(self.context, allocation.as_ptr() as *mut _, layout) }
   }
 }

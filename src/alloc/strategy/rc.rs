@@ -1,5 +1,5 @@
 use core::{
-  alloc::Layout, fmt::{self, Debug, Display}, marker::{CoercePointee, PhantomCovariantLifetime}, mem::MaybeUninit, ops::{Deref, DerefMut}, ptr
+  alloc::Layout, cell::Cell, fmt::{self, Debug, Display}, marker::{CoercePointee, PhantomCovariantLifetime}, mem::MaybeUninit, ops::Deref, ptr
 };
 
 use crate::alloc::UnsizedMaybeUninit;
@@ -7,27 +7,28 @@ use crate::alloc::UnsizedMaybeUninit;
 use super::{FreeVtable, SliceDst, Strategy, StrategyDataPtr, StrategyHandle, UninitStrategyHandleExt};
 
 #[derive(Default)]
-pub struct UniqueStrategy;
+pub struct RcStrategy;
 
 #[doc(hidden)]
 #[derive(SliceDst)]
 #[repr(C)]
-pub struct UniqueData<'a, T: ?Sized> {
+pub struct RcData<'a, T: ?Sized> {
   free_vtable: FreeVtable<'a>,
+  ref_count: Cell<usize>,
   value: T,
 }
 
-impl Strategy for UniqueStrategy {
-  type SizedData<'allocator, T: 'allocator> = UniqueData<'allocator, T>;
-  type SliceData<'allocator, T: SliceDst + ?Sized + 'allocator> = UniqueData<'allocator, T>;
-  type SizedHandle<'allocator, T: 'allocator> = Unique<'allocator, T>;
-  type SliceHandle<'allocator, T: SliceDst + ?Sized + 'allocator> = Unique<'allocator, T>;
-  type UninitSizedHandle<'allocator, T: 'allocator> = Unique<'allocator, MaybeUninit<T>>;
-  type UninitSliceHandle<'allocator, T: SliceDst + ?Sized + 'allocator> = Unique<'allocator, UnsizedMaybeUninit<T>>;
+impl Strategy for RcStrategy {
+  type SizedData<'allocator, T: 'allocator> = RcData<'allocator, T>;
+  type SliceData<'allocator, T: SliceDst + ?Sized + 'allocator> = RcData<'allocator, T>;
+  type SizedHandle<'allocator, T: 'allocator> = Rc<'allocator, T>;
+  type SliceHandle<'allocator, T: SliceDst + ?Sized + 'allocator> = Rc<'allocator, T>;
+  type UninitSizedHandle<'allocator, T: 'allocator> = Rc<'allocator, MaybeUninit<T>>;
+  type UninitSliceHandle<'allocator, T: SliceDst + ?Sized + 'allocator> = Rc<'allocator, UnsizedMaybeUninit<T>>;
 
   fn initialize_data_sized<'allocator, T: 'allocator>(
     free_vtable: FreeVtable<'allocator>,
-    data_ptr: *mut UniqueData<'allocator, T>,
+    data_ptr: *mut RcData<'allocator, T>,
   ) {
     unsafe {
       (&raw mut (*data_ptr).free_vtable).write(free_vtable);
@@ -44,27 +45,27 @@ impl Strategy for UniqueStrategy {
   }
 
   fn construct_handle_sized<'allocator, T: 'allocator>(
-    ptr: ptr::NonNull<UniqueData<'allocator, MaybeUninit<T>>>,
+    ptr: ptr::NonNull<RcData<'allocator, MaybeUninit<T>>>,
   ) -> Self::UninitSizedHandle<'allocator, T> {
-    Unique(ptr, Default::default())
+    Rc(ptr, Default::default())
   }
 
   fn construct_handle_slice<'allocator, T: SliceDst + ?Sized + 'allocator>(
-    ptr: ptr::NonNull<UniqueData<'allocator, UnsizedMaybeUninit<T>>>,
+    ptr: ptr::NonNull<RcData<'allocator, UnsizedMaybeUninit<T>>>,
   ) -> Self::UninitSliceHandle<'allocator, T> {
-    Unique(ptr, Default::default())
+    Rc(ptr, Default::default())
   }
 }
 
 #[derive(CoercePointee)]
 #[repr(transparent)]
-pub struct Unique<'allocator, T: ?Sized + 'allocator>(
-  ptr::NonNull<UniqueData<'allocator, T>>,
+pub struct Rc<'allocator, T: ?Sized + 'allocator>(
+  ptr::NonNull<RcData<'allocator, T>>,
   PhantomCovariantLifetime<'allocator>,
 );
 
-impl<'allocator, T: ?Sized> StrategyHandle<T> for Unique<'allocator, T> {
-  type Cast<'cast, U: ?Sized + 'cast> = Unique<'cast, U>;
+impl<'allocator, T: ?Sized> StrategyHandle<T> for Rc<'allocator, T> {
+  type Cast<'cast, U: ?Sized + 'cast> = Rc<'cast, U>;
 
   fn as_ptr(&self) -> *mut T {
     unsafe { (&raw mut (*self.0.as_ptr()).value) }
@@ -88,72 +89,71 @@ impl<'allocator, T: ?Sized> StrategyHandle<T> for Unique<'allocator, T> {
     }: StrategyDataPtr<T>,
   ) -> Self {
     let ptr = ptr::from_raw_parts_mut(start_ptr.as_ptr(), value_ptr.to_raw_parts().1);
-    Unique(unsafe { ptr::NonNull::new_unchecked(ptr) }, Default::default())
+    Rc(unsafe { ptr::NonNull::new_unchecked(ptr) }, Default::default())
   }
 }
 
-impl<'a, T: ?Sized> AsRef<T> for Unique<'a, T> {
+impl<'a, T: ?Sized> AsRef<T> for Rc<'a, T> {
   fn as_ref(&self) -> &T {
     unsafe { &self.0.as_ref().value }
   }
 }
 
-impl<'a, T: ?Sized> AsMut<T> for Unique<'a, T> {
-  fn as_mut(&mut self) -> &mut T {
-    unsafe { &mut self.0.as_mut().value }
-  }
-}
-
-impl<'a, T: ?Sized> Deref for Unique<'a, T> {
+impl<'a, T: ?Sized> Deref for Rc<'a, T> {
   type Target = T;
   fn deref(&self) -> &Self::Target {
     self.as_ref()
   }
 }
 
-impl<'a, T: ?Sized> DerefMut for Unique<'a, T> {
-  fn deref_mut(&mut self) -> &mut Self::Target {
-    self.as_mut()
-  }
-}
-
-impl<'a, T: ?Sized> Drop for Unique<'a, T> {
+impl<'a, T: ?Sized> Drop for Rc<'a, T> {
   fn drop(&mut self) {
-    let layout = Layout::for_value(self.as_ref());
-    unsafe { (&raw mut (*self.0.as_ptr()).free_vtable).read().free(self.0, layout) };
+    let data = unsafe { &*self.0.as_ptr() };
+
+    let ref_count = data.ref_count.get();
+
+    if ref_count == usize::MAX {
+      return;
+    }
+
+    data.ref_count.set(ref_count.saturating_sub(1));
+    if ref_count == 0 {
+      let layout = Layout::for_value(self.as_ref());
+      unsafe { (&raw mut (*self.0.as_ptr()).free_vtable).read().free(self.0, layout) };
+    }
   }
 }
 
-impl<'a, T: Debug + ?Sized> Debug for Unique<'a, T> {
+impl<'a, T: Debug + ?Sized> Debug for Rc<'a, T> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     self.deref().fmt(f)
   }
 }
 
-impl<'a, T: Display + ?Sized> Display for Unique<'a, T> {
+impl<'a, T: Display + ?Sized> Display for Rc<'a, T> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     self.deref().fmt(f)
   }
 }
 
-impl<'a, T> UninitStrategyHandleExt<MaybeUninit<T>> for Unique<'a, MaybeUninit<T>> {
-  type Init = Unique<'a, T>;
+impl<'a, T> UninitStrategyHandleExt<MaybeUninit<T>> for Rc<'a, MaybeUninit<T>> {
+  type Init = Rc<'a, T>;
 
   unsafe fn assume_init(self) -> Self::Init {
     let StrategyDataPtr { strategy_data, value } = Self::into_strategy_data_ptr(self);
     let (ptr, size) = value.to_raw_parts();
     let value = ptr::from_raw_parts_mut(ptr, size);
-    unsafe { Unique::from_strategy_data_ptr(StrategyDataPtr { strategy_data, value }) }
+    unsafe { Rc::from_strategy_data_ptr(StrategyDataPtr { strategy_data, value }) }
   }
 }
 
-impl<'a, T: SliceDst + ?Sized> UninitStrategyHandleExt<UnsizedMaybeUninit<T>> for Unique<'a, UnsizedMaybeUninit<T>> {
-  type Init = Unique<'a, T>;
+impl<'a, T: SliceDst + ?Sized> UninitStrategyHandleExt<UnsizedMaybeUninit<T>> for Rc<'a, UnsizedMaybeUninit<T>> {
+  type Init = Rc<'a, T>;
 
   unsafe fn assume_init(self) -> Self::Init {
     let StrategyDataPtr { strategy_data, value } = Self::into_strategy_data_ptr(self);
     let (ptr, size) = value.to_raw_parts();
     let value = ptr::from_raw_parts_mut(ptr, size);
-    unsafe { Unique::from_strategy_data_ptr(StrategyDataPtr { strategy_data, value }) }
+    unsafe { Rc::from_strategy_data_ptr(StrategyDataPtr { strategy_data, value }) }
   }
 }

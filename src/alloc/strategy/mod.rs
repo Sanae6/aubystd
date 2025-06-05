@@ -1,31 +1,44 @@
-pub mod unique;
+mod rc;
+mod unique;
 
-use core::ptr::{NonNull, Pointee};
+pub use rc::*;
+pub use unique::*;
 
-use super::{FreeVtable, SliceDst};
+use core::{
+  mem::MaybeUninit, ptr::{NonNull, Pointee}
+};
+
+use super::{FreeVtable, SliceDst, UnsizedMaybeUninit};
 
 pub trait Strategy {
   type SizedData<'allocator, T: 'allocator>; // stored in allocation
-  type SliceData<'allocator, T: SliceDst + ?Sized + 'allocator>: ?Sized + Pointee<Metadata = usize>; // stored in allocation
-  type Handle<'allocator, T: ?Sized + 'allocator>: StrategyHandle<T>; // reference to allocation
+  type SliceData<'allocator, T: SliceDst + ?Sized + 'allocator>: SliceDst + ?Sized + Pointee<Metadata = usize>; // stored in allocation
+  // reference to allocation
+  type SizedHandle<'allocator, T: 'allocator>: StrategyHandle<T>;
+  type SliceHandle<'allocator, T: SliceDst + ?Sized + 'allocator>: StrategyHandle<T>;
+  // uninitialized reference to allocation
+  type UninitSizedHandle<'allocator, T: 'allocator>: StrategyHandle<MaybeUninit<T>>
+    + UninitStrategyHandleExt<MaybeUninit<T>, Init = Self::SizedHandle<'allocator, T>>;
+  type UninitSliceHandle<'allocator, T: SliceDst + ?Sized + 'allocator>: StrategyHandle<UnsizedMaybeUninit<T>>
+    + UninitStrategyHandleExt<UnsizedMaybeUninit<T>, Init = Self::SliceHandle<'allocator, T>>;
 
   fn initialize_data_sized<'allocator, T: 'allocator>(
     free_vtable: FreeVtable<'allocator>,
     data_ptr: *mut Self::SizedData<'allocator, T>,
-  ) -> *mut T;
+  );
 
   fn initialize_data_slice<'allocator, T: SliceDst + ?Sized + 'allocator>(
     free_vtable: FreeVtable<'allocator>,
     data_ptr: *mut Self::SliceData<'allocator, T>,
-  ) -> *mut T;
+  );
 
   fn construct_handle_sized<'allocator, T: 'allocator>(
-    ptr: NonNull<Self::SizedData<'allocator, T>>,
-  ) -> Self::Handle<'allocator, T>;
+    ptr: NonNull<Self::SizedData<'allocator, MaybeUninit<T>>>,
+  ) -> Self::UninitSizedHandle<'allocator, T>;
 
   fn construct_handle_slice<'allocator, T: SliceDst + ?Sized + 'allocator>(
-    ptr: NonNull<Self::SliceData<'allocator, T>>,
-  ) -> Self::Handle<'allocator, T>;
+    ptr: NonNull<Self::SliceData<'allocator, UnsizedMaybeUninit<T>>>,
+  ) -> Self::UninitSliceHandle<'allocator, T>;
 }
 
 pub trait StrategyHandle<T: ?Sized>: Sized {
