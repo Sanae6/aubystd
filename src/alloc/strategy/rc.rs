@@ -187,7 +187,7 @@ pub mod tests {
   use core::cell::Cell;
 
   use crate::alloc::{
-    allocators::test_arena, strategy::{RC, RcData}
+    allocator::test_arena, strategy::{RC, RcData}
   };
 
   #[pollster::test]

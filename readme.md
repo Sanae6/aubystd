@@ -16,7 +16,8 @@ a standard library alternative
 - create and test implementations of all allocator types
   - page allocator
   - ~~c allocator~~
-  - arena dst allocator (allocates and frees all memory in one action each)
+  - ~~arena dst allocator (allocates and frees all memory in one action each)~~
   - dst allocator to item allocator wrapper
 - document all exposed functions and types
+  - important
 - document unsafety

@@ -1,25 +1,18 @@
-#![no_core]
-#![feature(no_core)]
-#![allow(internal_features)]
-#![feature(prelude_import)]
 #![feature(more_qualified_paths)]
+#![feature(custom_inner_attributes)]
 
-#[prelude_import]
 #[allow(unused)]
 use aubystd::prelude::*;
 
 use aubystd::{
   alloc::{
-    UnsizedMaybeUninit, allocators::{ArenaAllocator, ForeignAllocator, Malloc}, strategy::{Rc, Unique}
+    UnsizedMaybeUninit, allocator::{ArenaAllocator, ForeignAllocator, Malloc}, strategy::{Rc, Unique}
   }, zerocopy::FromZeros
 };
 
 use core::{
   cell::{Cell, RefCell, UnsafeCell}, fmt::{Debug, Display}, mem::MaybeUninit, pin::Pin, task::{Context, Poll}
 };
-
-#[epic]
-mod sex {}
 
 #[derive(SliceDst, FromZeros)]
 #[repr(C)]
@@ -190,15 +183,16 @@ fn main() -> ! {
     }
 
     #[derive(Default)]
-    struct Tick(Cell<bool>);
+    struct Tick(Cell<u32>);
     impl Future for Tick {
       type Output = ();
 
       fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.0.get() {
+        if self.0.get() < 3 {
+          _cx.waker().wake_by_ref();
+          self.0.set(self.0.get() + 1);
           Poll::Pending
         } else {
-          self.0.set(true);
           Poll::Ready(())
         }
       }

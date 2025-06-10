@@ -2,7 +2,7 @@ use core::{
   alloc::Layout, mem::MaybeUninit, ptr::{self, NonNull}
 };
 
-use crate::alloc::{Allocator, FreeVtable, UnsizedMaybeUninit, strategy::Strategy};
+use crate::alloc::{FreeVtable, UnsizedMaybeUninit, strategy::Strategy};
 
 use super::{AllocateError, OutOfMemory, calculate_layout_for_dst};
 
@@ -112,7 +112,7 @@ pub mod tests {
   use std::assert_matches::assert_matches;
 
   use crate::alloc::{
-    Allocator, allocators::{AllocateError, ForeignAllocator, StdAlloc}, strategy::{UNIQUE, Unique}
+    allocator::{AllocateError, ForeignAllocator, StdAlloc}, strategy::{UNIQUE, Unique}
   };
 
   #[pollster::test]

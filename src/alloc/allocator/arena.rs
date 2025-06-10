@@ -1,23 +1,23 @@
 use core::{
-  cell::{Cell, UnsafeCell}, mem::MaybeUninit, ops::Deref, ptr::{self, NonNull}
+  cell::{Cell, SyncUnsafeCell, UnsafeCell}, mem::MaybeUninit, ops::Deref, ptr::{self, NonNull}
 };
 
-use crate::alloc::{Allocator, FreeVtable, SliceDst, allocators::OutOfMemory, strategy::Strategy};
+use crate::alloc::{FreeVtable, SliceDst, allocator::OutOfMemory, strategy::Strategy};
 
 use super::{AllocateError, OverflowedLayoutCalculation, calculate_layout_for_dst};
 
-pub struct ArenaAllocator<D: Deref<Target = UnsafeCell<[MaybeUninit<u8>]>>> {
+pub struct ArenaAllocator<A: UnsafeCellBuffer> {
   head: Cell<usize>,
-  data: D,
+  data: A
 }
 
-impl<D: Deref<Target = UnsafeCell<[MaybeUninit<u8>]>>> ArenaAllocator<D> {
-  pub fn new(data: D) -> Self {
+impl<A: UnsafeCellBuffer> ArenaAllocator<A> {
+  pub fn new(data: A) -> Self {
     Self { head: 0.into(), data }
   }
 
   pub fn len(&self) -> usize {
-    self.data.deref().get().len()
+    self.data.get().len()
   }
 
   pub fn remaining(&self) -> usize {
@@ -25,7 +25,7 @@ impl<D: Deref<Target = UnsafeCell<[MaybeUninit<u8>]>>> ArenaAllocator<D> {
   }
 }
 
-impl<D: Deref<Target = UnsafeCell<[MaybeUninit<u8>]>>> Allocator for ArenaAllocator<D> {
+impl<A: UnsafeCellBuffer> Allocator for ArenaAllocator<A> {
   type UnderlyingAllocateError = !;
 
   async fn reserve_item<'allocator, S: Strategy, T: 'allocator>(
@@ -40,7 +40,7 @@ impl<D: Deref<Target = UnsafeCell<[MaybeUninit<u8>]>>> Allocator for ArenaAlloca
     }
 
     let head = self.head.replace(new_head);
-    let ptr = unsafe { self.data.deref().get().byte_add(head).cast() };
+    let ptr = unsafe { self.data.get().byte_add(head).cast() };
 
     S::initialize_data_sized(FreeVtable::new_empty(), ptr);
 
@@ -59,12 +59,34 @@ impl<D: Deref<Target = UnsafeCell<[MaybeUninit<u8>]>>> Allocator for ArenaAlloca
     }
 
     let head = self.head.replace(new_head);
-    let ptr = unsafe { self.data.deref().get().byte_add(head) };
+    let ptr = unsafe { self.data.get().byte_add(head) };
     let ptr = ptr::from_raw_parts_mut(ptr.cast::<u8>(), element_count);
 
     S::initialize_data_slice(FreeVtable::new_empty(), ptr);
 
     Ok(S::construct_handle_slice(unsafe { NonNull::new_unchecked(ptr) }))
+  }
+}
+
+pub trait UnsafeCellBuffer {
+  fn get(&self) -> *mut [MaybeUninit<u8>];
+}
+
+impl UnsafeCellBuffer for UnsafeCell<[MaybeUninit<u8>]> {
+  fn get(&self) -> *mut [MaybeUninit<u8>] {
+    UnsafeCell::get(self)
+  }
+}
+
+impl UnsafeCellBuffer for SyncUnsafeCell<[MaybeUninit<u8>]> {
+  fn get(&self) -> *mut [MaybeUninit<u8>] {
+    SyncUnsafeCell::get(self)
+  }
+}
+
+impl<T: UnsafeCellBuffer + ?Sized, D: Deref<Target = T>> UnsafeCellBuffer for D {
+  fn get(&self) -> *mut [MaybeUninit<u8>] {
+    T::get(self.deref())
   }
 }
 
@@ -74,7 +96,7 @@ mod tests {
   use std::assert_matches::assert_matches;
 
   use crate::alloc::{
-    Allocator, allocators::{AllocateError, ArenaAllocator}, strategy::{UNIQUE, Unique, UniqueData}
+    allocator::{AllocateError, ArenaAllocator}, strategy::{UNIQUE, Unique, UniqueData}
   };
 
   pub fn test_arena<const SIZE: usize>() -> ArenaAllocator<Box<UnsafeCell<[MaybeUninit<u8>]>>> {
