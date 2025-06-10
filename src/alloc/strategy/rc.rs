@@ -8,6 +8,7 @@ use super::{FreeVtable, SliceDst, Strategy, StrategyDataPtr, StrategyHandle, Uni
 
 #[derive(Default)]
 pub struct RcStrategy;
+pub const RC: RcStrategy = RcStrategy;
 
 #[doc(hidden)]
 #[derive(SliceDst)]
@@ -73,7 +74,7 @@ impl<'allocator, T: ?Sized> StrategyHandle<T> for Rc<'allocator, T> {
 
   fn into_strategy_data_ptr(self) -> StrategyDataPtr<T> {
     let strategy_data_ptr = StrategyDataPtr {
-      strategy_data: unsafe { ptr::NonNull::new_unchecked(self.0.as_ptr() as *mut _) },
+      strategy_data_ptr: unsafe { ptr::NonNull::new_unchecked(self.0.as_ptr() as *mut _) },
       value: self.as_ptr(),
     };
 
@@ -84,7 +85,7 @@ impl<'allocator, T: ?Sized> StrategyHandle<T> for Rc<'allocator, T> {
 
   unsafe fn from_strategy_data_ptr(
     StrategyDataPtr {
-      strategy_data: start_ptr,
+      strategy_data_ptr: start_ptr,
       value: value_ptr,
     }: StrategyDataPtr<T>,
   ) -> Self {
@@ -103,6 +104,13 @@ impl<'a, T: ?Sized> Deref for Rc<'a, T> {
   type Target = T;
   fn deref(&self) -> &Self::Target {
     self.as_ref()
+  }
+}
+
+impl<'a, T: Sized> Clone for Rc<'a, T> {
+  fn clone(&self) -> Self {
+    let Self(ptr, phantom) = self;
+    Self(ptr.clone(), phantom.clone())
   }
 }
 
@@ -140,10 +148,18 @@ impl<'a, T> UninitStrategyHandleExt<MaybeUninit<T>> for Rc<'a, MaybeUninit<T>> {
   type Init = Rc<'a, T>;
 
   unsafe fn assume_init(self) -> Self::Init {
-    let StrategyDataPtr { strategy_data, value } = Self::into_strategy_data_ptr(self);
+    let StrategyDataPtr {
+      strategy_data_ptr: strategy_data,
+      value,
+    } = Self::into_strategy_data_ptr(self);
     let (ptr, size) = value.to_raw_parts();
     let value = ptr::from_raw_parts_mut(ptr, size);
-    unsafe { Rc::from_strategy_data_ptr(StrategyDataPtr { strategy_data, value }) }
+    unsafe {
+      Rc::from_strategy_data_ptr(StrategyDataPtr {
+        strategy_data_ptr: strategy_data,
+        value,
+      })
+    }
   }
 }
 
@@ -151,9 +167,37 @@ impl<'a, T: SliceDst + ?Sized> UninitStrategyHandleExt<UnsizedMaybeUninit<T>> fo
   type Init = Rc<'a, T>;
 
   unsafe fn assume_init(self) -> Self::Init {
-    let StrategyDataPtr { strategy_data, value } = Self::into_strategy_data_ptr(self);
+    let StrategyDataPtr {
+      strategy_data_ptr: strategy_data,
+      value,
+    } = Self::into_strategy_data_ptr(self);
     let (ptr, size) = value.to_raw_parts();
     let value = ptr::from_raw_parts_mut(ptr, size);
-    unsafe { Rc::from_strategy_data_ptr(StrategyDataPtr { strategy_data, value }) }
+    unsafe {
+      Rc::from_strategy_data_ptr(StrategyDataPtr {
+        strategy_data_ptr: strategy_data,
+        value,
+      })
+    }
+  }
+}
+
+#[cfg(test)]
+pub mod tests {
+  use core::cell::Cell;
+
+  use crate::alloc::{
+    allocators::test_arena, strategy::{RC, RcData}
+  };
+
+  #[pollster::test]
+  async fn allocate() {
+    let arena = test_arena::<{ size_of::<RcData<Cell<u32>>>() }>();
+    let handle = arena.take_item(RC, Cell::new(42)).await.unwrap();
+    assert_eq!(handle.get(), 42);
+    let second_handle = handle.clone();
+    assert_eq!(second_handle.get(), 42);
+    second_handle.set(16);
+    assert_eq!(handle.get(), 16);
   }
 }

@@ -1,7 +1,11 @@
-mod foreign;
+pub mod arena;
+pub mod foreign;
 
 use core::{alloc::Layout, error::Error};
 
+#[doc(inline)]
+pub use arena::*;
+#[doc(inline)]
 pub use foreign::*;
 
 use thiserror::Error;
@@ -9,7 +13,7 @@ use thiserror::Error;
 use super::SliceDst;
 
 #[derive(Debug, Error)]
-#[error("overflowed while attempting to calculate layout")]
+#[error("overflowed while attempting to calculate memory layout")]
 pub struct OverflowedLayoutCalculation;
 #[derive(Debug, Error)]
 #[error("allocator is out of memory")]
@@ -30,7 +34,7 @@ pub fn calculate_layout_for_dst<T: SliceDst + ?Sized>(
 ) -> Result<Layout, OverflowedLayoutCalculation> {
   let header = Layout::new::<T::Header>();
   let array = Layout::array::<T::Element>(element_count).map_err(|_| OverflowedLayoutCalculation)?;
-  Layout::extend(&header, array).map(|tuple| tuple.0).map_err(|_| OverflowedLayoutCalculation)
+  Layout::extend(&header, array).map(|tuple| tuple.0.pad_to_align()).map_err(|_| OverflowedLayoutCalculation)
 
   // would be nice to rely on for_value_raw, but it has safety issues that can't be ignored if layout calc overflows
   // Ok(unsafe { Layout::for_value_raw(ptr) })

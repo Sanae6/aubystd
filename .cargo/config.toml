@@ -1,0 +1,8 @@
+[build]
+rustc-wrapper = ".cargo/faux-rustc.nu"
+# [profile.dev]
+# panic = "abort"
+
+# [unstable]
+# mtime-on-use = true
+# build-std = ["core"]

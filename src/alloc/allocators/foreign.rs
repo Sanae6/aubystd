@@ -1,5 +1,5 @@
 use core::{
-  alloc::Layout, marker::PhantomData, mem::MaybeUninit, ptr::{self, NonNull}
+  alloc::Layout, mem::MaybeUninit, ptr::{self, NonNull}
 };
 
 use crate::alloc::{Allocator, FreeVtable, UnsizedMaybeUninit, strategy::Strategy};
@@ -12,17 +12,13 @@ pub trait CStyleAllocator {
 }
 
 #[derive(Default)]
-pub struct ForeignAllocator<C: CStyleAllocator, S: Strategy> {
+pub struct ForeignAllocator<C: CStyleAllocator> {
   allocator: C,
-  strategy: PhantomData<S>,
 }
 
-impl<C: CStyleAllocator, S: Strategy> ForeignAllocator<C, S> {
+impl<C: CStyleAllocator> ForeignAllocator<C> {
   pub fn new(allocator: C) -> Self {
-    Self {
-      allocator,
-      strategy: PhantomData,
-    }
+    Self { allocator }
   }
 
   fn create_free_vtable<'allocator>(&'allocator self) -> FreeVtable<'allocator> {
@@ -40,11 +36,12 @@ impl<C: CStyleAllocator, S: Strategy> ForeignAllocator<C, S> {
   }
 }
 
-impl<C: CStyleAllocator, S: Strategy> Allocator<S> for ForeignAllocator<C, S> {
+impl<C: CStyleAllocator> Allocator for ForeignAllocator<C> {
   type UnderlyingAllocateError = !;
 
-  async fn reserve_item<'allocator, T: 'allocator>(
+  async fn reserve_item<'allocator, S: Strategy, T: 'allocator>(
     &'allocator self,
+    _: S,
   ) -> Result<S::UninitSizedHandle<'allocator, T>, AllocateError<!>> {
     let layout = Layout::new::<S::SizedData<'allocator, T>>();
 
@@ -56,8 +53,9 @@ impl<C: CStyleAllocator, S: Strategy> Allocator<S> for ForeignAllocator<C, S> {
     Ok(S::construct_handle_sized(data_ptr))
   }
 
-  async fn reserve_dst<'allocator, T: crate::alloc::SliceDst + ?Sized + 'allocator>(
+  async fn reserve_dst<'allocator, S: Strategy, T: crate::alloc::SliceDst + ?Sized + 'allocator>(
     &'allocator self,
+    _: S,
     element_count: usize,
   ) -> Result<S::UninitSliceHandle<'allocator, T>, AllocateError<!>> {
     let layout = calculate_layout_for_dst::<S::SliceData<'allocator, UnsizedMaybeUninit<T>>>(element_count)?;
@@ -106,5 +104,34 @@ impl CStyleAllocator for StdAlloc {
     unsafe {
       rust_alloc::alloc::dealloc(ptr.as_ptr(), layout);
     };
+  }
+}
+
+#[cfg(test)]
+pub mod tests {
+  use std::assert_matches::assert_matches;
+
+  use crate::alloc::{
+    Allocator, allocators::{AllocateError, ForeignAllocator, StdAlloc}, strategy::{UNIQUE, Unique}
+  };
+
+  #[pollster::test]
+  async fn allocate_item() {
+    let arena = ForeignAllocator::new(StdAlloc);
+    arena.take_item(UNIQUE, 5u32).await.unwrap();
+  }
+
+  #[pollster::test]
+  async fn allocate_items() {
+    let arena = ForeignAllocator::new(StdAlloc);
+    let _handle = arena.take_item(UNIQUE, 5u32).await.unwrap();
+    let _handle = arena.take_item(UNIQUE, 5u32).await.unwrap();
+  }
+
+  #[pollster::test]
+  async fn allocate_dst_overflow() {
+    let arena = ForeignAllocator::new(StdAlloc);
+    let result: Result<Unique<[u32]>, _> = arena.take_from_zeros(UNIQUE, usize::MAX).await;
+    assert_matches!(result, Err(AllocateError::OverflowedLayoutCalculation(_)));
   }
 }

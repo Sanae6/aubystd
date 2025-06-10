@@ -17,6 +17,7 @@ thiserror = "2.0.12"
 default = []
 libc = ["dep:libc"]
 alloc = []
+debugging = ["alloc"]
 
 [workspace]
 resolver = "3"

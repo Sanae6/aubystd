@@ -220,6 +220,7 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
         FieldsKind::Named => {
           let last_ident_header = Ident::new(&format!("{last_ident}_header"), Span::call_site());
           quote! {
+            #[doc(hidden)]
             #(#[repr(#reprs)])*
             #vis struct #header_name #generics {
               #(#fields,)*
@@ -229,6 +230,7 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
         }
         FieldsKind::Unnamed => {
           quote! {
+            #[doc(hidden)]
             #vis struct #header_name #generics (#(#fields,)* <#last_ty as #crate_name::alloc::SliceDst>::Header);
           }
         }
@@ -255,4 +257,9 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
     Ok(output) => output.into(),
     Err(error) => error.into_compile_error().into(),
   }
+}
+
+#[proc_macro_attribute]
+pub fn epic(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  item
 }

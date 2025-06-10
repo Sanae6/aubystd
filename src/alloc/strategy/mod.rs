@@ -5,14 +5,15 @@ pub use rc::*;
 pub use unique::*;
 
 use core::{
-  mem::MaybeUninit, ptr::{NonNull, Pointee}
+  mem::MaybeUninit, pin::Pin, ptr::{NonNull, Pointee}
 };
 
 use super::{FreeVtable, SliceDst, UnsizedMaybeUninit};
 
 pub trait Strategy {
-  type SizedData<'allocator, T: 'allocator>; // stored in allocation
-  type SliceData<'allocator, T: SliceDst + ?Sized + 'allocator>: SliceDst + ?Sized + Pointee<Metadata = usize>; // stored in allocation
+  // stored in allocation
+  type SizedData<'allocator, T: 'allocator>;
+  type SliceData<'allocator, T: SliceDst + ?Sized + 'allocator>: SliceDst + ?Sized + Pointee<Metadata = usize>;
   // reference to allocation
   type SizedHandle<'allocator, T: 'allocator>: StrategyHandle<T>;
   type SliceHandle<'allocator, T: SliceDst + ?Sized + 'allocator>: StrategyHandle<T>;
@@ -52,15 +53,37 @@ pub trait StrategyHandle<T: ?Sized>: Sized {
 /// Represents the pointer to the strategy data that contains T.
 /// This newtype is intended to indicate that the contained pointer is *not* simply a pointer T.
 ///
-/// The reason for this type's existence is the generics issues of passing [Strategy::Data] into [Strategy::Handle] for
+/// The reason for this type's existence is the generics issues of passing strategy data into [StrategyHandle] for
 /// [StrategyHandle::into_strategy_data_ptr] and [StrategyHandle::from_strategy_data_ptr].
 pub struct StrategyDataPtr<T: ?Sized> {
-  pub strategy_data: NonNull<()>,
-  pub value: *mut T,
+  strategy_data_ptr: NonNull<()>,
+  value: *mut T,
+}
+
+impl<T: ?Sized> StrategyDataPtr<T> {
+  pub fn as_strategy_data_ptr(&self) -> NonNull<()> {
+    self.strategy_data_ptr
+  }
+  pub fn as_value_ptr(&self) -> *mut T {
+    self.value
+  }
+  pub fn into_pair(self) -> (NonNull<()>, *mut T) {
+    (self.strategy_data_ptr, self.value)
+  }
+  pub fn from_pair(strategy_data_ptr: NonNull<()>, value: *mut T) -> Self {
+    Self {
+      strategy_data_ptr,
+      value,
+    }
+  }
 }
 
 pub trait UninitStrategyHandleExt<T: ?Sized>: StrategyHandle<T> {
   type Init;
 
   unsafe fn assume_init(self) -> Self::Init;
+}
+
+pub trait PinStrategyHandle<T: ?Sized>: StrategyHandle<T> {
+  fn into_pin(self) -> Pin<Self>;
 }

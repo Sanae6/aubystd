@@ -1,4 +1,4 @@
-use core::ptr::Pointee;
+use core::{cell::UnsafeCell, ptr::Pointee};
 
 pub use aubystd_macros::SliceDst;
 
@@ -16,5 +16,23 @@ unsafe impl<T> SliceDst for [T] {
 
   fn addr_of_slice(ptr: *mut Self) -> *mut [Self::Element] {
     ptr
+  }
+}
+
+unsafe impl SliceDst for str {
+  type Header = ();
+  type Element = u8;
+
+  fn addr_of_slice(ptr: *mut Self) -> *mut [Self::Element] {
+    ptr as *mut _
+  }
+}
+
+unsafe impl<T: SliceDst + ?Sized> SliceDst for UnsafeCell<T> {
+  type Header = T::Header;
+  type Element = T::Element;
+
+  fn addr_of_slice(ptr: *mut Self) -> *mut [Self::Element] {
+    T::addr_of_slice(UnsafeCell::raw_get(ptr as *const _))
   }
 }

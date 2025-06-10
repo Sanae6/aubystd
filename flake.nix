@@ -25,7 +25,7 @@
       in
         with pkgs; {
           formatter = alejandra;
-          devShells.default = mkShell rec {
+          devShells.default = mkShell  {
             buildInputs = [
               pkgs.fenix.complete.toolchain
               lldb

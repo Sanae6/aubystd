@@ -9,8 +9,10 @@ a standard library alternative
 - require drop impl on handles
 - handling frees when coercepointee only allows one field (transparent)
   - how does alloc::boxed::Box handle storing its allocator?
-    - solved by `FreeVtable` unfortunately and hopefully temporarily
-    - still need to figure out implementing dyn dispatch for non pointer sized types
+    - it doesn't. it's a lang item, so it ignores the rule
+    - but it doesn't support dyn dispatch on custom allocators
+  - solved by `FreeVtable` unfortunately and hopefully temporarily
+  - still need to figure out implementing dyn dispatch for non pointer sized types
 - create and test implementations of all allocator types
   - page allocator
   - ~~c allocator~~
