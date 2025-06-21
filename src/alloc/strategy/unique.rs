@@ -179,18 +179,10 @@ impl<'a, T> UninitStrategyHandleExt<MaybeUninit<T>> for Unique<'a, MaybeUninit<T
   type Init = Unique<'a, T>;
 
   unsafe fn assume_init(self) -> Self::Init {
-    let StrategyDataPtr {
-      strategy_data_ptr: strategy_data,
-      value,
-    } = Self::into_strategy_data_ptr(self);
+    let (strategy_data, value) = Self::into_strategy_data_ptr(self).into_pair();
     let (ptr, size) = value.to_raw_parts();
     let value = ptr::from_raw_parts_mut(ptr, size);
-    unsafe {
-      Unique::from_strategy_data_ptr(StrategyDataPtr {
-        strategy_data_ptr: strategy_data,
-        value,
-      })
-    }
+    unsafe { Unique::from_strategy_data_ptr(StrategyDataPtr::from_pair(strategy_data, value)) }
   }
 }
 

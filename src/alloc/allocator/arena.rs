@@ -34,6 +34,7 @@ impl<A: UnsafeCellBuffer> Allocator for ArenaAllocator<A> {
   ) -> Result<S::UninitSizedHandle<'allocator, T>, AllocateError<Self::UnderlyingAllocateError>> {
     let new_head =
       self.head.get().checked_add(size_of::<S::SizedData<'allocator, T>>()).ok_or(OverflowedLayoutCalculation)?;
+    todo!("align from data.get() rather than head");
 
     if new_head > self.len() {
       return Err(OutOfMemory.into());
@@ -54,6 +55,7 @@ impl<A: UnsafeCellBuffer> Allocator for ArenaAllocator<A> {
   ) -> Result<S::UninitSliceHandle<'allocator, T>, AllocateError<Self::UnderlyingAllocateError>> {
     let layout = calculate_layout_for_dst::<S::SliceData<'allocator, T>>(element_count)?;
     let new_head = self.head.get().checked_add(layout.size()).ok_or(OverflowedLayoutCalculation)?;
+    todo!("align from data.get() rather than head");
     if new_head > self.len() {
       return Err(OutOfMemory.into());
     }

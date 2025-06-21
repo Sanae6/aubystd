@@ -19,6 +19,8 @@ pub extern crate core;
 pub extern crate std;
 
 pub mod alloc;
+pub mod io;
+pub mod num;
 pub use zerocopy;
 
 pub mod prelude {
@@ -27,6 +29,7 @@ pub mod prelude {
   };
   pub use aubystd_macros::epic;
 
+  pub use core::prelude::rust_2024::*;
   #[cfg(any(test, feature = "debugging"))]
   pub use std::{eprintln, prelude::rust_2024::*, println};
   pub use zerocopy;

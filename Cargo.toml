@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 aubystd-macros = { version = "0.1.0", path = "macros" }
 libc = { version = "0.2.172", default-features = false, optional = true }
+num-traits = "0.2.19"
 thiserror = { version = "2.0.12", default-features = false }
 zerocopy = { version = "0.8.25", features = ["derive"] }
 
@@ -16,6 +17,7 @@ thiserror = "2.0.12"
 [features]
 default = []
 libc = ["dep:libc"]
+crt = ["dep:libc"]
 alloc = []
 debugging = ["alloc"]
 
