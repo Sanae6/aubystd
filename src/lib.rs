@@ -21,6 +21,7 @@ pub extern crate std;
 pub mod alloc;
 pub mod io;
 pub mod num;
+pub mod bool-ext;
 pub use zerocopy;
 
 pub mod prelude {
