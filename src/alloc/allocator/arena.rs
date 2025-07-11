@@ -2,7 +2,7 @@ use core::{
   cell::{Cell, SyncUnsafeCell, UnsafeCell}, mem::MaybeUninit, ops::Deref, ptr::{self, NonNull}
 };
 
-use crate::alloc::{FreeVtable, OutOfMemory, SliceAllocator, SliceDst, strategy::Strategy};
+use crate::alloc::{FreeVtable, OutOfMemory, SliceAllocator, SliceDst, UnsizedMaybeUninit, strategy::Strategy};
 
 use super::calculate_layout_for_dst;
 
@@ -28,27 +28,31 @@ impl<A: UnsafeCellBuffer> ArenaAllocator<A> {
 impl<'s, T: 's, A: UnsafeCellBuffer> Allocator<'s, T> for ArenaAllocator<A> {
   type Error = OutOfMemory;
 
-  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::UninitSizedHandle<'s, T>, OutOfMemory> {
+  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::Handle<'s, MaybeUninit<T>>, OutOfMemory>
+  where
+    S::Data<'s, MaybeUninit<T>>: Sized,
+  {
     // Safety: buffer ptr + head < buffer end ptr, never overflows
-    let alignment_offset =
-      unsafe { self.data.get().cast::<u8>().add(self.head.get()).align_offset(align_of::<S::SizedData<'s, T>>()) };
+    let alignment_offset = unsafe {
+      self.data.get().cast::<u8>().add(self.head.get()).align_offset(align_of::<S::Data<'s, MaybeUninit<T>>>())
+    };
 
     let new_head = self
       .head
       .get()
       .checked_add(alignment_offset)
       .ok_or(OutOfMemory)?
-      .checked_add(size_of::<S::SizedData<'s, T>>())
+      .checked_add(size_of::<S::Data<'s, MaybeUninit<T>>>())
       .ok_or(OutOfMemory)?;
 
     if new_head > self.len() {
       return Err(OutOfMemory);
     }
 
-    let head = self.head.replace(new_head);
-    let ptr = unsafe { self.data.get().byte_add(head).cast() };
+    let head = self.head.replace(new_head) + alignment_offset;
+    let ptr = ptr::without_provenance_mut(unsafe { self.data.get().byte_add(head).addr() });
 
-    S::initialize_data_sized(FreeVtable::new_empty(), ptr);
+    unsafe { S::initialize_data(FreeVtable::new_empty(), ptr) };
 
     Ok(S::construct_handle_sized(unsafe { NonNull::new_unchecked(ptr) }))
   }
@@ -56,8 +60,15 @@ impl<'s, T: 's, A: UnsafeCellBuffer> Allocator<'s, T> for ArenaAllocator<A> {
 
 impl<'s, T: SliceDst + ?Sized + 's, A: UnsafeCellBuffer> SliceAllocator<'s, T> for ArenaAllocator<A> {
   type Error = OutOfMemory;
-  async fn reserve_slice<S: Strategy>(&'s self, length: usize) -> Result<S::UninitSliceHandle<'s, T>, OutOfMemory> {
-    let layout = calculate_layout_for_dst::<S::SliceData<'s, T>>(length).map_err(|_| OutOfMemory)?;
+  async fn reserve_slice<S: Strategy>(
+    &'s self,
+    length: usize,
+  ) -> Result<S::Handle<'s, UnsizedMaybeUninit<T>>, OutOfMemory>
+  where
+    S::Data<'s, UnsizedMaybeUninit<T>>: SliceDst,
+  {
+    let layout = calculate_layout_for_dst::<S::Data<'s, UnsizedMaybeUninit<T>>>(length).map_err(|_| OutOfMemory)?;
+    // Safety: buffer ptr + head < buffer end ptr, never overflows
     let alignment_offset = unsafe { self.data.get().cast::<u8>().add(self.head.get()).align_offset(layout.align()) };
     let new_head = self
       .head
@@ -75,7 +86,7 @@ impl<'s, T: SliceDst + ?Sized + 's, A: UnsafeCellBuffer> SliceAllocator<'s, T> f
     let ptr = unsafe { self.data.get().byte_add(head) };
     let ptr = ptr::from_raw_parts_mut(ptr.cast::<u8>(), length);
 
-    S::initialize_data_slice(FreeVtable::new_empty(), ptr);
+    unsafe { S::initialize_data(FreeVtable::new_empty(), ptr) };
 
     Ok(S::construct_handle_slice(unsafe { NonNull::new_unchecked(ptr) }))
   }

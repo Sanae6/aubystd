@@ -2,7 +2,7 @@ pub mod arena;
 pub mod foreign;
 
 use core::{
-  alloc::{Layout, LayoutError}, error::Error, pin::Pin, ptr
+  alloc::{Layout, LayoutError}, error::Error, mem::MaybeUninit, pin::Pin, ptr
 };
 
 #[doc(inline)]
@@ -13,7 +13,7 @@ pub use foreign::*;
 use thiserror::Error;
 use zerocopy::FromZeros;
 
-use crate::alloc::strategy::Strategy;
+use crate::alloc::{UnsizedMaybeUninit, strategy::Strategy};
 
 use super::SliceDst;
 
@@ -25,18 +25,29 @@ pub trait Allocator<'s, T: 's> {
   type Error: Error;
 
   /// Allocates an uninitialized handle
-  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::UninitSizedHandle<'s, T>, Self::Error>;
+  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::Handle<'s, MaybeUninit<T>>, Self::Error>
+  where
+    S::Data<'s, MaybeUninit<T>>: Sized;
 
-  async fn take<S: Strategy>(&'s self, value: T) -> Result<S::SizedHandle<'s, T>, Self::Error> {
+  async fn take<S: Strategy>(&'s self, value: T) -> Result<S::Handle<'s, T>, Self::Error>
+  where
+    S::Data<'s, MaybeUninit<T>>: Sized,
+    S::Handle<'s, MaybeUninit<T>>: UninitStrategyHandleExt<'s, MaybeUninit<T>>,
+    <S::Handle<'s, MaybeUninit<T>> as UninitStrategyHandleExt<'s, MaybeUninit<T>>>::Init: Into<S::Handle<'s, T>>,
+  {
     let item = self.reserve_item::<S>().await?;
     //
-    unsafe { item.as_ptr().cast::<T>().write(value) };
+    unsafe { S::Handle::as_value_ptr(&item).cast::<T>().write(value) };
     // Safety: item was initialized above
-    Ok(unsafe { item.assume_init() })
+    Ok(unsafe { S::Handle::assume_init(item).into() })
   }
-  async fn pin<S: Strategy>(&'s self, value: T) -> Result<Pin<S::SizedHandle<'s, T>>, Self::Error>
+
+  async fn pin<S: Strategy>(&'s self, value: T) -> Result<Pin<S::Handle<'s, T>>, Self::Error>
   where
-    S::SizedHandle<'s, T>: PinStrategyHandle<T>,
+    S::Data<'s, MaybeUninit<T>>: Sized,
+    S::Handle<'s, T>: PinStrategyHandle<'s, T>,
+    S::Handle<'s, MaybeUninit<T>>: UninitStrategyHandleExt<'s, MaybeUninit<T>>,
+    <S::Handle<'s, MaybeUninit<T>> as UninitStrategyHandleExt<'s, MaybeUninit<T>>>::Init: Into<S::Handle<'s, T>>,
   {
     Ok(self.take::<S>(value).await?.into_pin())
   }
@@ -45,21 +56,30 @@ pub trait Allocator<'s, T: 's> {
 pub trait SliceAllocator<'s, T: SliceDst + ?Sized + 's> {
   type Error: Error;
 
-  async fn reserve_slice<S: Strategy>(&'s self, length: usize) -> Result<S::UninitSliceHandle<'s, T>, Self::Error>;
+  async fn reserve_slice<S: Strategy>(
+    &'s self,
+    length: usize,
+  ) -> Result<S::Handle<'s, UnsizedMaybeUninit<T>>, Self::Error>
+  where
+    S::Data<'s, UnsizedMaybeUninit<T>>: SliceDst;
 
-  async fn from_zeros<S: Strategy>(&'s self, length: usize) -> Result<S::SliceHandle<'s, T>, Self::Error>
+  async fn from_zeros<S: Strategy>(&'s self, length: usize) -> Result<S::Handle<'s, T>, Self::Error>
   where
     T::Header: FromZeros,
     T::Element: FromZeros,
+    S::Data<'s, UnsizedMaybeUninit<T>>: SliceDst,
+    S::Handle<'s, UnsizedMaybeUninit<T>>: UninitStrategyHandleExt<'s, UnsizedMaybeUninit<T>>,
+    <S::Handle<'s, UnsizedMaybeUninit<T>> as UninitStrategyHandleExt<'s, UnsizedMaybeUninit<T>>>::Init:
+      Into<S::Handle<'s, T>>,
   {
     let slice = self.reserve_slice::<S>(length).await?;
     unsafe {
-      let ptr = slice.as_ptr();
+      let ptr = S::Handle::as_value_ptr(&slice);
       ptr.cast::<T::Header>().write_bytes(0, 1);
       let (ptr, _) = ptr.to_raw_parts();
       T::addr_of_slice(ptr::from_raw_parts_mut(ptr, length)).cast::<T::Element>().write_bytes(0, length);
     };
-    Ok(unsafe { slice.assume_init() })
+    Ok(unsafe { S::Handle::assume_init(slice).into() })
   }
 }
 

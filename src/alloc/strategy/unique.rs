@@ -1,10 +1,12 @@
 use core::{
-  alloc::Layout, borrow::{Borrow, BorrowMut}, fmt::{self, Debug, Display}, marker::{CoercePointee, PhantomCovariantLifetime}, mem::MaybeUninit, ops::{Deref, DerefMut, DerefPure}, pin::Pin, ptr
+  alloc::Layout, borrow::{Borrow, BorrowMut}, fmt::{self, Debug, Display}, marker::{variance, CoercePointee}, mem::{forget, MaybeUninit}, ops::{Deref, DerefMut, DerefPure}, pin::Pin, ptr::{self, Pointee}
 };
 
-use crate::alloc::{UnsizedMaybeUninit, strategy::PinStrategyHandle};
+use crate::alloc::{
+  UnsizedMaybeUninit, strategy::{PinStrategyHandle, StrategyVariance, assert_alignment}
+};
 
-use super::{FreeVtable, SliceDst, Strategy, StrategyDataPtr, StrategyHandle, UninitStrategyHandleExt};
+use super::{FreeVtable, SliceDst, Strategy, StrategyHandle, UninitStrategyHandleExt};
 
 #[derive(Default)]
 pub struct UniqueStrategy;
@@ -19,63 +21,50 @@ pub struct UniqueData<'a, T: ?Sized> {
 }
 
 impl Strategy for UniqueStrategy {
-  type SizedData<'allocator, T: 'allocator> = UniqueData<'allocator, T>;
-  type SliceData<'allocator, T: SliceDst + ?Sized + 'allocator> = UniqueData<'allocator, T>;
-  type SizedHandle<'allocator, T: 'allocator> = Unique<'allocator, T>;
-  type SliceHandle<'allocator, T: SliceDst + ?Sized + 'allocator> = Unique<'allocator, T>;
-  type UninitSizedHandle<'allocator, T: 'allocator> = Unique<'allocator, MaybeUninit<T>>;
-  type UninitSliceHandle<'allocator, T: SliceDst + ?Sized + 'allocator> = Unique<'allocator, UnsizedMaybeUninit<T>>;
+  type Data<'a, T: ?Sized + 'a> = UniqueData<'a, T>;
+  type Handle<'a, T: ?Sized + 'a> = Unique<'a, T>;
 
-  fn initialize_data_sized<'allocator, T: 'allocator>(
-    free_vtable: FreeVtable<'allocator>,
-    data_ptr: *mut UniqueData<'allocator, T>,
-  ) {
+  /// Safety: data_ptr must be aligned and point to valid memory
+  unsafe fn initialize_data<'a, T: ?Sized + 'a>(free_vtable: FreeVtable<'a>, data_ptr: *mut Self::Data<'a, T>) {
+    assert_alignment(data_ptr);
+    // Safety: data_ptr is valid and properly aligned
     unsafe {
       (&raw mut (*data_ptr).free_vtable).write(free_vtable);
     }
   }
 
-  fn initialize_data_slice<'allocator, T: SliceDst + ?Sized + 'allocator>(
-    free_vtable: FreeVtable<'allocator>,
-    data_ptr: *mut Self::SliceData<'allocator, T>,
-  ) {
-    unsafe {
-      (&raw mut (*data_ptr).free_vtable).write(free_vtable);
-    }
+  fn construct_handle_sized<'a, T: 'a>(
+    ptr: ptr::NonNull<UniqueData<'a, MaybeUninit<T>>>,
+  ) -> Self::Handle<'a, MaybeUninit<T>> {
+    Unique(ptr, variance())
   }
 
-  fn construct_handle_sized<'allocator, T: 'allocator>(
-    ptr: ptr::NonNull<UniqueData<'allocator, MaybeUninit<T>>>,
-  ) -> Self::UninitSizedHandle<'allocator, T> {
-    Unique(ptr, Default::default())
-  }
-
-  fn construct_handle_slice<'allocator, T: SliceDst + ?Sized + 'allocator>(
-    ptr: ptr::NonNull<UniqueData<'allocator, UnsizedMaybeUninit<T>>>,
-  ) -> Self::UninitSliceHandle<'allocator, T> {
-    Unique(ptr, Default::default())
+  fn construct_handle_slice<'a, T: SliceDst + ?Sized + 'a>(
+    ptr: ptr::NonNull<UniqueData<'a, UnsizedMaybeUninit<T>>>,
+  ) -> Self::Handle<'a, UnsizedMaybeUninit<T>> {
+    Unique(ptr, variance())
   }
 }
 
 #[derive(CoercePointee)]
 #[repr(transparent)]
-pub struct Unique<'allocator, T: ?Sized + 'allocator>(
-  ptr::NonNull<UniqueData<'allocator, T>>,
-  PhantomCovariantLifetime<'allocator>,
-);
+pub struct Unique<'a, T: ?Sized + 'a>(ptr::NonNull<UniqueData<'a, T>>, StrategyVariance<'a>);
 
-impl<'allocator, T> Unique<'allocator, T> {
+impl<'a, T> Unique<'a, T> {
   pub fn into_inner(self) -> T {
     unsafe {
+      // Safety: ptr is valid, and we aren't dropping the value in-place
       let data = self.0.read();
-      let layout = Layout::for_value_raw(self.0.as_ptr() as *const _);
-      (&raw mut (*self.0.as_ptr()).free_vtable).read().free(self.0, layout);
+      // Safety: ptr's layout is already known to be safe to use
+      let layout = Layout::for_value_raw(self.0.as_ptr().cast_const());
+      // Safety: upheld by previous statements and full ownership of `self`
+      (&raw const (*self.0.as_ptr()).free_vtable).read().free(self.0, layout);
       data.value
     }
   }
 }
 
-impl<'allocator, T: ?Sized> Unique<'allocator, T> {
+impl<'a, T: ?Sized> Unique<'a, T> {
   pub fn into_pin(unique: Self) -> Pin<Self> {
     // safety comment from Box::into_pin
     // It's not possible to move or replace the insides of a `Pin<Unique<T>>`
@@ -85,32 +74,32 @@ impl<'allocator, T: ?Sized> Unique<'allocator, T> {
   }
 }
 
-impl<'allocator, T: ?Sized> StrategyHandle<T> for Unique<'allocator, T> {
-  type Cast<'cast, U: ?Sized + 'cast> = Unique<'cast, U>;
+impl<'a, T: ?Sized> StrategyHandle<'a, T> for Unique<'a, T> {
+  type Cast<U: ?Sized + 'a> = Unique<'a, U>;
 
-  fn as_ptr(&self) -> *mut T {
-    unsafe { (&raw mut (*self.0.as_ptr()).value) }
+  fn as_value_ptr(this: &Self) -> *mut T {
+    // safety: value is valid and properly aligned
+    unsafe { (&raw mut (*this.0.as_ptr()).value) }
   }
 
-  fn into_strategy_data_ptr(self) -> StrategyDataPtr<T> {
-    let strategy_data_ptr = StrategyDataPtr {
-      strategy_data_ptr: unsafe { ptr::NonNull::new_unchecked(self.0.as_ptr() as *mut _) },
-      value: self.as_ptr(),
-    };
+  // Casts the smart pointer to `U`
+  unsafe fn cast<U: ?Sized, M>(this: Self) -> Self::Cast<U>
+  where
+    T: Pointee<Metadata = M>,
+    U: Pointee<Metadata = M>,
+  {
+    let (ptr, metadata) = this.0.to_raw_parts();
+    let new_value = ptr::NonNull::<UniqueData<'a, U>>::from_raw_parts(ptr as _, metadata);
+    unsafe {
+      assert_eq!(
+        Layout::for_value_raw::<UniqueData<'a, T>>(this.0.as_ptr().cast_const()),
+        Layout::for_value_raw::<UniqueData<'a, U>>(new_value.as_ptr().cast_const())
+      );
+    }
 
-    core::mem::forget(self);
+    forget(this);
 
-    strategy_data_ptr
-  }
-
-  unsafe fn from_strategy_data_ptr(
-    StrategyDataPtr {
-      strategy_data_ptr: start_ptr,
-      value: value_ptr,
-    }: StrategyDataPtr<T>,
-  ) -> Self {
-    let ptr = ptr::from_raw_parts_mut(start_ptr.as_ptr(), value_ptr.to_raw_parts().1);
-    Unique(unsafe { ptr::NonNull::new_unchecked(ptr) }, Default::default())
+    Unique(new_value, variance())
   }
 }
 
@@ -156,7 +145,9 @@ unsafe impl<'a, T: ?Sized> DerefPure for Unique<'a, T> {}
 impl<'a, T: ?Sized> Drop for Unique<'a, T> {
   fn drop(&mut self) {
     unsafe {
+      // Safety: ptr is valid, aligned, non-null, and only one reference to its value is held.
       self.0.drop_in_place();
+      // Safety: ptr's layout is already known to be safe to use
       let layout = Layout::for_value_raw(self.0.as_ptr() as *const _);
       (&raw mut (*self.0.as_ptr()).free_vtable).read().free(self.0, layout);
     }
@@ -175,39 +166,27 @@ impl<'a, T: Display + ?Sized> Display for Unique<'a, T> {
   }
 }
 
-impl<'a, T> UninitStrategyHandleExt<MaybeUninit<T>> for Unique<'a, MaybeUninit<T>> {
+impl<'a, T> UninitStrategyHandleExt<'a, MaybeUninit<T>> for Unique<'a, MaybeUninit<T>> {
   type Init = Unique<'a, T>;
 
-  unsafe fn assume_init(self) -> Self::Init {
-    let (strategy_data, value) = Self::into_strategy_data_ptr(self).into_pair();
-    let (ptr, size) = value.to_raw_parts();
-    let value = ptr::from_raw_parts_mut(ptr, size);
-    unsafe { Unique::from_strategy_data_ptr(StrategyDataPtr::from_pair(strategy_data, value)) }
+  unsafe fn assume_init(this: Self) -> Self::Init {
+    unsafe { Unique::cast(this) }
   }
 }
 
-impl<'a, T: SliceDst + ?Sized> UninitStrategyHandleExt<UnsizedMaybeUninit<T>> for Unique<'a, UnsizedMaybeUninit<T>> {
+impl<'a, T: SliceDst + ?Sized> UninitStrategyHandleExt<'a, UnsizedMaybeUninit<T>>
+  for Unique<'a, UnsizedMaybeUninit<T>>
+{
   type Init = Unique<'a, T>;
 
-  unsafe fn assume_init(self) -> Self::Init {
-    let StrategyDataPtr {
-      strategy_data_ptr: strategy_data,
-      value,
-    } = Self::into_strategy_data_ptr(self);
-    let (ptr, size) = value.to_raw_parts();
-    let value = ptr::from_raw_parts_mut(ptr, size);
-    unsafe {
-      Unique::from_strategy_data_ptr(StrategyDataPtr {
-        strategy_data_ptr: strategy_data,
-        value,
-      })
-    }
+  unsafe fn assume_init(this: Self) -> Self::Init {
+    unsafe { Unique::cast(this) }
   }
 }
 
 impl<'a, T: ?Sized> Unpin for Unique<'a, T> {}
 
-impl<'a, T: ?Sized> PinStrategyHandle<T> for Unique<'a, T> {
+impl<'a, T: ?Sized> PinStrategyHandle<'a, T> for Unique<'a, T> {
   fn into_pin(self) -> Pin<Self> {
     // See alloc::boxed::Box::into_pin
     unsafe { Pin::new_unchecked(self) }

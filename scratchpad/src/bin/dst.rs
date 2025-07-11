@@ -137,7 +137,7 @@ fn main() -> ! {
       for index in 0..5 {
         handle.slice[index].write(index as u8 + 3);
       }
-      handle.assume_init()
+      Unique::assume_init(handle)
     };
     println!("{}", handle);
     let handle: Unique<A<[u8]>> = handle;
@@ -158,25 +158,22 @@ fn main() -> ! {
       for index in 0..5 {
         handle.slice[index].write(index as u32 + 3);
       }
-      handle.assume_init()
+      Unique::assume_init(handle)
     };
     println!("{}", handle);
 
-    let handle: Unique<UnsafeCell<[MaybeUninit<u8>]>> = unsafe {
-      let handle: Unique<UnsizedMaybeUninit<UnsafeCell<[MaybeUninit<u8>]>>> =
-        allocator.reserve_slice::<UniqueStrategy>(4096).await.unwrap();
-      handle.assume_init()
-    };
+    let mut allocation_handle: Unique<UnsafeCell<[MaybeUninit<u8>]>> = allocator.from_zeros::<UniqueStrategy>(4096).await.unwrap();
 
     {
-      let allocator = ArenaAllocator::new(handle);
-      let _handle: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
-      let _handle: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
-      let _handle: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
-      _handle.into_pin();
+      let allocator = ArenaAllocator::new(&mut allocation_handle);
+      let _handle1: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
+      let _handle2: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
+      let _handle3: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
       // unsafe { libc::printf(c"allocator remaining bytes: %d\n".as_ptr(), allocator.remaining()) }
 
       // let _handle: Unique<[u8]> = allocator.from_zeros(1024).await.unwrap();
+      // drop((handle1, handle2, handle3));
+      // drop(allocator);
     }
 
     #[derive(Default)]
