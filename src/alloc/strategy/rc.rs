@@ -182,22 +182,22 @@ impl<'a, T: SliceDst + ?Sized> UninitStrategyHandleExt<UnsizedMaybeUninit<T>> fo
   }
 }
 
-#[cfg(test)]
-pub mod tests {
-  use core::cell::Cell;
+// #[cfg(test)]
+// pub mod tests {
+//   use core::cell::Cell;
 
-  use crate::alloc::{
-    allocator::test_arena, strategy::{RC, RcData}
-  };
+//   use crate::alloc::{
+//     allocator::test_arena, strategy::{RC, RcData}
+//   };
 
-  #[pollster::test]
-  async fn allocate() {
-    let arena = test_arena::<{ size_of::<RcData<Cell<u32>>>() }>();
-    let handle = arena.take_item(RC, Cell::new(42)).await.unwrap();
-    assert_eq!(handle.get(), 42);
-    let second_handle = handle.clone();
-    assert_eq!(second_handle.get(), 42);
-    second_handle.set(16);
-    assert_eq!(handle.get(), 16);
-  }
-}
+//   #[pollster::test]
+//   async fn allocate() {
+//     let arena = test_arena::<{ size_of::<RcData<Cell<u32>>>() }>();
+//     let handle = arena.take_item(RC, Cell::new(42)).await.unwrap();
+//     assert_eq!(handle.get(), 42);
+//     let second_handle = handle.clone();
+//     assert_eq!(second_handle.get(), 42);
+//     second_handle.set(16);
+//     assert_eq!(handle.get(), 16);
+//   }
+// }

@@ -2,9 +2,9 @@ use core::{
   alloc::Layout, mem::MaybeUninit, ptr::{self, NonNull}
 };
 
-use crate::alloc::{FreeVtable, UnsizedMaybeUninit, strategy::Strategy};
+use crate::alloc::{FreeVtable, SliceAllocator, UnsizedMaybeUninit, strategy::Strategy};
 
-use super::{AllocateError, OutOfMemory, calculate_layout_for_dst};
+use super::{OutOfMemory, calculate_layout_for_dst};
 
 pub trait CStyleAllocator {
   fn alloc(&self, layout: Layout) -> Result<NonNull<u8>, OutOfMemory>;
@@ -36,33 +36,31 @@ impl<C: CStyleAllocator> ForeignAllocator<C> {
   }
 }
 
-impl<C: CStyleAllocator> Allocator for ForeignAllocator<C> {
-  type UnderlyingAllocateError = !;
+impl<'s, T: 's, C: CStyleAllocator> Allocator<'s, T> for ForeignAllocator<C> {
+  type Error = OutOfMemory;
 
-  async fn reserve_item<'allocator, S: Strategy, T: 'allocator>(
-    &'allocator self,
-    _: S,
-  ) -> Result<S::UninitSizedHandle<'allocator, T>, AllocateError<!>> {
-    let layout = Layout::new::<S::SizedData<'allocator, T>>();
+  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::UninitSizedHandle<'s, T>, OutOfMemory> {
+    let layout = Layout::new::<S::SizedData<'s, T>>();
 
-    let data_ptr = self.allocator.alloc(layout).map_err(AllocateError::OutOfMemory)?;
-    let data_ptr = data_ptr.cast::<S::SizedData<'allocator, MaybeUninit<T>>>();
+    let data_ptr = self.allocator.alloc(layout)?;
+    let data_ptr = data_ptr.cast::<S::SizedData<'s, MaybeUninit<T>>>();
 
     S::initialize_data_sized(self.create_free_vtable(), data_ptr.as_ptr());
 
     Ok(S::construct_handle_sized(data_ptr))
   }
+}
 
-  async fn reserve_dst<'allocator, S: Strategy, T: crate::alloc::SliceDst + ?Sized + 'allocator>(
-    &'allocator self,
-    _: S,
-    element_count: usize,
-  ) -> Result<S::UninitSliceHandle<'allocator, T>, AllocateError<!>> {
-    let layout = calculate_layout_for_dst::<S::SliceData<'allocator, UnsizedMaybeUninit<T>>>(element_count)?;
+impl<'s, T: SliceDst + ?Sized + 's, C: CStyleAllocator> SliceAllocator<'s, T> for ForeignAllocator<C> {
+  type Error = OutOfMemory;
+
+  async fn reserve_slice<S: Strategy>(&'s self, length: usize) -> Result<S::UninitSliceHandle<'s, T>, OutOfMemory> {
+    let layout =
+      calculate_layout_for_dst::<S::SliceData<'s, UnsizedMaybeUninit<T>>>(length).map_err(|_| OutOfMemory)?;
 
     let data_ptr = self.allocator.alloc(layout)?;
-    let data_ptr: NonNull<S::SliceData<'allocator, UnsizedMaybeUninit<T>>> =
-      unsafe { NonNull::new_unchecked(ptr::from_raw_parts_mut(data_ptr.as_ptr() as *mut (), element_count)) };
+    let data_ptr: NonNull<S::SliceData<'s, UnsizedMaybeUninit<T>>> =
+      unsafe { NonNull::new_unchecked(ptr::from_raw_parts_mut(data_ptr.as_ptr() as *mut (), length)) };
 
     S::initialize_data_slice(self.create_free_vtable(), data_ptr.as_ptr());
 
@@ -109,29 +107,19 @@ impl CStyleAllocator for StdAlloc {
 
 #[cfg(test)]
 pub mod tests {
-  use std::assert_matches::assert_matches;
-
   use crate::alloc::{
-    allocator::{AllocateError, ForeignAllocator, StdAlloc}, strategy::{UNIQUE, Unique}
+    allocator::{ForeignAllocator, StdAlloc}, strategy::UniqueStrategy
   };
 
   #[pollster::test]
   async fn allocate_item() {
     let arena = ForeignAllocator::new(StdAlloc);
-    arena.take_item(UNIQUE, 5u32).await.unwrap();
+    arena.take::<UniqueStrategy>(5u32).await.unwrap();
   }
 
   #[pollster::test]
   async fn allocate_items() {
     let arena = ForeignAllocator::new(StdAlloc);
-    let _handle = arena.take_item(UNIQUE, 5u32).await.unwrap();
-    let _handle = arena.take_item(UNIQUE, 5u32).await.unwrap();
-  }
-
-  #[pollster::test]
-  async fn allocate_dst_overflow() {
-    let arena = ForeignAllocator::new(StdAlloc);
-    let result: Result<Unique<[u32]>, _> = arena.take_from_zeros(UNIQUE, usize::MAX).await;
-    assert_matches!(result, Err(AllocateError::OverflowedLayoutCalculation(_)));
+    let _handle = arena.take::<UniqueStrategy>(5u32).await.unwrap();
   }
 }

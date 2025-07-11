@@ -2,13 +2,13 @@ use core::{
   cell::{Cell, SyncUnsafeCell, UnsafeCell}, mem::MaybeUninit, ops::Deref, ptr::{self, NonNull}
 };
 
-use crate::alloc::{FreeVtable, SliceDst, allocator::OutOfMemory, strategy::Strategy};
+use crate::alloc::{FreeVtable, OutOfMemory, SliceAllocator, SliceDst, strategy::Strategy};
 
-use super::{AllocateError, OverflowedLayoutCalculation, calculate_layout_for_dst};
+use super::calculate_layout_for_dst;
 
 pub struct ArenaAllocator<A: UnsafeCellBuffer> {
   head: Cell<usize>,
-  data: A
+  data: A,
 }
 
 impl<A: UnsafeCellBuffer> ArenaAllocator<A> {
@@ -25,19 +25,24 @@ impl<A: UnsafeCellBuffer> ArenaAllocator<A> {
   }
 }
 
-impl<A: UnsafeCellBuffer> Allocator for ArenaAllocator<A> {
-  type UnderlyingAllocateError = !;
+impl<'s, T: 's, A: UnsafeCellBuffer> Allocator<'s, T> for ArenaAllocator<A> {
+  type Error = OutOfMemory;
 
-  async fn reserve_item<'allocator, S: Strategy, T: 'allocator>(
-    &'allocator self,
-    _: S,
-  ) -> Result<S::UninitSizedHandle<'allocator, T>, AllocateError<Self::UnderlyingAllocateError>> {
-    let new_head =
-      self.head.get().checked_add(size_of::<S::SizedData<'allocator, T>>()).ok_or(OverflowedLayoutCalculation)?;
-    todo!("align from data.get() rather than head");
+  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::UninitSizedHandle<'s, T>, OutOfMemory> {
+    // Safety: buffer ptr + head < buffer end ptr, never overflows
+    let alignment_offset =
+      unsafe { self.data.get().cast::<u8>().add(self.head.get()).align_offset(align_of::<S::SizedData<'s, T>>()) };
+
+    let new_head = self
+      .head
+      .get()
+      .checked_add(alignment_offset)
+      .ok_or(OutOfMemory)?
+      .checked_add(size_of::<S::SizedData<'s, T>>())
+      .ok_or(OutOfMemory)?;
 
     if new_head > self.len() {
-      return Err(OutOfMemory.into());
+      return Err(OutOfMemory);
     }
 
     let head = self.head.replace(new_head);
@@ -47,22 +52,28 @@ impl<A: UnsafeCellBuffer> Allocator for ArenaAllocator<A> {
 
     Ok(S::construct_handle_sized(unsafe { NonNull::new_unchecked(ptr) }))
   }
+}
 
-  async fn reserve_dst<'allocator, S: Strategy, T: SliceDst + ?Sized + 'allocator>(
-    &'allocator self,
-    _: S,
-    element_count: usize,
-  ) -> Result<S::UninitSliceHandle<'allocator, T>, AllocateError<Self::UnderlyingAllocateError>> {
-    let layout = calculate_layout_for_dst::<S::SliceData<'allocator, T>>(element_count)?;
-    let new_head = self.head.get().checked_add(layout.size()).ok_or(OverflowedLayoutCalculation)?;
-    todo!("align from data.get() rather than head");
+impl<'s, T: SliceDst + ?Sized + 's, A: UnsafeCellBuffer> SliceAllocator<'s, T> for ArenaAllocator<A> {
+  type Error = OutOfMemory;
+  async fn reserve_slice<S: Strategy>(&'s self, length: usize) -> Result<S::UninitSliceHandle<'s, T>, OutOfMemory> {
+    let layout = calculate_layout_for_dst::<S::SliceData<'s, T>>(length).map_err(|_| OutOfMemory)?;
+    let alignment_offset = unsafe { self.data.get().cast::<u8>().add(self.head.get()).align_offset(layout.align()) };
+    let new_head = self
+      .head
+      .get()
+      .checked_add(alignment_offset)
+      .ok_or(OutOfMemory)?
+      .checked_add(layout.size())
+      .ok_or(OutOfMemory)?;
+
     if new_head > self.len() {
-      return Err(OutOfMemory.into());
+      return Err(OutOfMemory);
     }
 
     let head = self.head.replace(new_head);
     let ptr = unsafe { self.data.get().byte_add(head) };
-    let ptr = ptr::from_raw_parts_mut(ptr.cast::<u8>(), element_count);
+    let ptr = ptr::from_raw_parts_mut(ptr.cast::<u8>(), length);
 
     S::initialize_data_slice(FreeVtable::new_empty(), ptr);
 
@@ -98,7 +109,7 @@ mod tests {
   use std::assert_matches::assert_matches;
 
   use crate::alloc::{
-    allocator::{AllocateError, ArenaAllocator}, strategy::{UNIQUE, Unique, UniqueData}
+    SliceAllocator, allocator::{ArenaAllocator, OutOfMemory}, strategy::{Unique, UniqueData, UniqueStrategy}
   };
 
   pub fn test_arena<const SIZE: usize>() -> ArenaAllocator<Box<UnsafeCell<[MaybeUninit<u8>]>>> {
@@ -111,45 +122,45 @@ mod tests {
   #[pollster::test]
   async fn allocate_item() {
     let arena = test_arena::<{ size_of::<UniqueData<u32>>() + 4 }>();
-    arena.take_item(UNIQUE, 5u32).await.unwrap();
+    arena.take::<UniqueStrategy>(5u32).await.unwrap();
   }
 
   #[pollster::test]
   async fn allocate_items() {
     let arena = test_arena::<{ size_of::<UniqueData<u32>>() * 2 }>();
-    let _handle = arena.take_item(UNIQUE, 5u32).await.unwrap();
-    let _handle = arena.take_item(UNIQUE, 5u32).await.unwrap();
-    let result = arena.take_item(UNIQUE, 5u32).await;
-    assert_matches!(result, Err(AllocateError::OutOfMemory(_)));
+    let _handle = arena.take::<UniqueStrategy>(5u32).await.unwrap();
+    let _handle = arena.take::<UniqueStrategy>(5u32).await.unwrap();
+    let result = arena.take::<UniqueStrategy>(5u32).await;
+    assert_matches!(result, Err(OutOfMemory));
   }
 
   #[pollster::test]
   async fn allocate_dst() {
     let arena = test_arena::<{ size_of::<UniqueData<u32>>() + 4 }>();
-    let _: Unique<[u32]> = arena.take_from_zeros(UNIQUE, 1).await.unwrap();
-    let result: Result<Unique<[u32]>, _> = arena.take_from_zeros(UNIQUE, 1).await;
-    assert_matches!(result, Err(AllocateError::OutOfMemory(_)));
+    let _: Unique<u32> = arena.take::<UniqueStrategy>(1).await.unwrap();
+    let result: Result<Unique<u32>, _> = arena.take::<UniqueStrategy>(1).await;
+    assert_matches!(result, Err(OutOfMemory));
   }
 
   #[pollster::test]
   async fn allocate_item_oom() {
     let arena = test_arena::<0>();
-    let result: Result<Unique<MaybeUninit<[u8; 1]>>, _> = arena.reserve_item(UNIQUE).await;
-    assert_matches!(result, Err(AllocateError::OutOfMemory(_)));
+    let result: Result<Unique<u8>, _> = arena.take::<UniqueStrategy>(1).await;
+    assert_matches!(result, Err(OutOfMemory));
   }
 
   #[pollster::test]
   async fn allocate_dst_oom() {
     let arena = test_arena::<0>();
-    let result: Result<Unique<[u32]>, _> = arena.take_from_zeros(UNIQUE, 42).await;
-    assert_matches!(result, Err(AllocateError::OutOfMemory(_)));
+    let result: Result<Unique<[u8]>, _> = arena.from_zeros::<UniqueStrategy>(1).await;
+    assert_matches!(result, Err(OutOfMemory));
   }
 
   #[pollster::test]
   async fn allocate_dst_overflow() {
     let arena = test_arena::<0>();
-    let result: Result<Unique<[u32]>, _> = arena.take_from_zeros(UNIQUE, usize::MAX).await;
-    assert_matches!(result, Err(AllocateError::OverflowedLayoutCalculation(_)));
+    let result: Result<Unique<[u32]>, _> = arena.from_zeros::<UniqueStrategy>(usize::MAX).await;
+    assert_matches!(result, Err(OutOfMemory));
   }
 }
 

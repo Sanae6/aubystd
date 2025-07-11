@@ -25,7 +25,7 @@ pub use zerocopy;
 
 pub mod prelude {
   pub use crate::alloc::{
-    allocator::Allocator, ItemAllocator, SliceDst, strategy::{PinStrategyHandle, RC, Rc, StrategyHandle, UNIQUE, UninitStrategyHandleExt, Unique}
+    Allocator, SliceDst, strategy::{PinStrategyHandle, RC, Rc, StrategyHandle, UNIQUE, UninitStrategyHandleExt, Unique}
   };
   pub use aubystd_macros::epic;
 

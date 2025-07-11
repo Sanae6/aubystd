@@ -1,4 +1,4 @@
-pub mod fs;
+// pub mod fs;
 
 pub trait StreamWriter {
   type WriteError;
