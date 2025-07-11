@@ -1,5 +1,5 @@
 use core::{
-  alloc::Layout, cell::Cell, fmt::{self, Debug, Display}, marker::{CoercePointee, variance}, mem::MaybeUninit, ops::Deref, ptr::{self, Pointee}
+  alloc::Layout, cell::Cell, fmt::{self, Debug, Display}, marker::{variance, CoercePointee}, mem::{forget, MaybeUninit}, ops::Deref, ptr::{self, Pointee}
 };
 
 use crate::alloc::{
@@ -53,6 +53,7 @@ impl<'a, T: ?Sized> StrategyHandle<'a, T> for Rc<'a, T> {
   type Cast<U: ?Sized + 'a> = Rc<'a, U>;
 
   fn as_value_ptr(this: &Self) -> *mut T {
+    // safety: value is valid and properly aligned
     unsafe { (&raw mut (*this.0.as_ptr()).value) }
   }
 
@@ -62,15 +63,17 @@ impl<'a, T: ?Sized> StrategyHandle<'a, T> for Rc<'a, T> {
     T: Pointee<Metadata = M>,
     U: Pointee<Metadata = M>,
   {
+    let (ptr, metadata) = this.0.to_raw_parts();
+    let new_value = ptr::NonNull::<RcData<'a, U>>::from_raw_parts(ptr as _, metadata);
     unsafe {
       assert_eq!(
-        Layout::for_value_raw(this.0.as_ptr() as _),
-        Layout::for_value_raw(this.0.as_ptr() as _)
+        Layout::for_value_raw::<RcData<'a, T>>(this.0.as_ptr().cast_const()),
+        Layout::for_value_raw::<RcData<'a, U>>(new_value.as_ptr().cast_const())
       );
     }
 
-    let (ptr, metadata) = this.0.to_raw_parts();
-    let new_value = ptr::NonNull::from_raw_parts(ptr as _, metadata);
+    forget(this);
+
     Rc(new_value, variance())
   }
 }

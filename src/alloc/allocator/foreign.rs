@@ -15,7 +15,7 @@ pub unsafe trait CStyleAllocator {
   fn alloc(&self, layout: Layout) -> Result<ptr::NonNull<u8>, OutOfMemory>;
   /// Safety:
   /// - `ptr` must point to a valid memory block allocated by this allocator
-  /// - `layout` must
+  /// - `layout` must be the layout of the memory block
   unsafe fn free(&self, ptr: ptr::NonNull<u8>, layout: Layout);
 }
 
