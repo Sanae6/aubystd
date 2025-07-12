@@ -34,6 +34,9 @@ pub mod prelude {
   pub use std::{eprintln, prelude::rust_2024::*, println};
   pub use zerocopy;
 }
+#[cfg(test)]
+#[cfg(feature = "libc")]
+pub use crate::alloc::arena::test_arena;
 
 #[prelude_import]
 #[allow(unused)]

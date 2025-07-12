@@ -9,6 +9,7 @@ libc = { version = "0.2.172", default-features = false, optional = true }
 num-traits = "0.2.19"
 thiserror = { version = "2.0.12", default-features = false }
 zerocopy = { version = "0.8.25", features = ["derive"] }
+pollster = "0.4.0"
 
 [dev-dependencies]
 pollster = { version = "0.4.0", features = ["macro"] }

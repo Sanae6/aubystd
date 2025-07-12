@@ -1,8 +1,6 @@
-use core::{
-  alloc::Layout, mem::MaybeUninit, ptr
-};
+use core::{alloc::Layout, mem::MaybeUninit, ptr};
 
-use crate::alloc::{FreeVtable, SliceAllocator, UnsizedMaybeUninit, strategy::Strategy};
+use crate::alloc::{FreeVtable, LayoutAllocator, SliceAllocator, UnsizedMaybeUninit, strategy::Strategy};
 
 use super::{OutOfMemory, calculate_layout_for_dst};
 
@@ -62,7 +60,7 @@ impl<'s, T: 's, C: CStyleAllocator> Allocator<'s, T> for ForeignAllocator<C> {
     // Safety: alloc only returns valid, well aligned pointers for the provided layout
     unsafe { S::initialize_data(self.create_free_vtable(), data_ptr.as_ptr()) };
 
-    Ok(S::construct_handle_sized(data_ptr))
+    Ok(S::construct_handle(data_ptr))
   }
 }
 
@@ -84,7 +82,29 @@ impl<'s, T: SliceDst + ?Sized + 's, C: CStyleAllocator> SliceAllocator<'s, T> fo
     // Safety: alloc only returns valid, well aligned pointers for the provided layout
     unsafe { S::initialize_data(self.create_free_vtable(), data_ptr.as_ptr()) };
 
-    Ok(S::construct_handle_slice(data_ptr))
+    Ok(S::construct_handle(data_ptr))
+  }
+}
+
+impl<C: CStyleAllocator> LayoutAllocator for ForeignAllocator<C> {
+  type Error = OutOfMemory;
+
+  async fn reserve_layout<'s, S: Strategy>(
+    &'s self,
+    layout: Layout,
+  ) -> Result<S::Handle<'s, [MaybeUninit<u8>]>, Self::Error>
+  where
+    S::Data<'s, ()>: Sized,
+    S::Data<'s, [MaybeUninit<u8>]>: ptr::Pointee<Metadata = usize>,
+  {
+    let new_layout = Layout::new::<S::Data<'s, ()>>().extend(layout).map_err(|_| OutOfMemory)?.0.pad_to_align();
+    let data_ptr = self.allocator.alloc(new_layout)?;
+    let data_ptr: ptr::NonNull<S::Data<'s, [MaybeUninit<u8>]>> = ptr::NonNull::from_raw_parts(data_ptr, new_layout.size());
+
+    // Safety: alloc only returns valid, well aligned pointers for the provided layout
+    unsafe { S::initialize_data(self.create_free_vtable(), data_ptr.as_ptr()) };
+
+    Ok(S::construct_handle(data_ptr))
   }
 }
 
@@ -126,6 +146,7 @@ unsafe impl CStyleAllocator for StdAlloc {
 }
 
 #[cfg(test)]
+#[cfg(feature = "libc")]
 pub mod tests {
   use crate::alloc::{
     allocator::{ForeignAllocator, StdAlloc}, strategy::UniqueStrategy

@@ -1,5 +1,5 @@
 use core::{
-  alloc::Layout, borrow::{Borrow, BorrowMut}, fmt::{self, Debug, Display}, marker::{variance, CoercePointee}, mem::{forget, MaybeUninit}, ops::{Deref, DerefMut, DerefPure}, pin::Pin, ptr::{self, Pointee}
+  alloc::Layout, borrow::{Borrow, BorrowMut}, fmt::{self, Debug, Display}, marker::{CoercePointee, variance}, mem::{MaybeUninit, forget, offset_of}, ops::{Deref, DerefMut, DerefPure}, pin::Pin, ptr::{self, Pointee}
 };
 
 use crate::alloc::{
@@ -33,15 +33,7 @@ impl Strategy for UniqueStrategy {
     }
   }
 
-  fn construct_handle_sized<'a, T: 'a>(
-    ptr: ptr::NonNull<UniqueData<'a, MaybeUninit<T>>>,
-  ) -> Self::Handle<'a, MaybeUninit<T>> {
-    Unique(ptr, variance())
-  }
-
-  fn construct_handle_slice<'a, T: SliceDst + ?Sized + 'a>(
-    ptr: ptr::NonNull<UniqueData<'a, UnsizedMaybeUninit<T>>>,
-  ) -> Self::Handle<'a, UnsizedMaybeUninit<T>> {
+  fn construct_handle<'a, T: ?Sized + 'a>(ptr: ptr::NonNull<UniqueData<'a, T>>) -> Self::Handle<'a, T> {
     Unique(ptr, variance())
   }
 }
@@ -74,7 +66,7 @@ impl<'a, T: ?Sized> Unique<'a, T> {
   }
 }
 
-impl<'a, T: ?Sized> StrategyHandle<'a, T> for Unique<'a, T> {
+impl<'a, T: ?Sized + Pointee> StrategyHandle<'a, T> for Unique<'a, T> {
   type Cast<U: ?Sized + 'a> = Unique<'a, U>;
 
   fn as_value_ptr(this: &Self) -> *mut T {
@@ -82,12 +74,14 @@ impl<'a, T: ?Sized> StrategyHandle<'a, T> for Unique<'a, T> {
     unsafe { (&raw mut (*this.0.as_ptr()).value) }
   }
 
+  unsafe fn from_value_ptr(ptr: *mut T) -> Self {
+    let (ptr, metadata) = unsafe { ptr.byte_sub(offset_of!(UniqueData<'static, ()>, value)) }.to_raw_parts();
+    let ptr = ptr::NonNull::from_raw_parts(ptr::NonNull::new(ptr).unwrap(), metadata);
+    Unique(ptr, variance())
+  }
+
   // Casts the smart pointer to `U`
-  unsafe fn cast<U: ?Sized, M>(this: Self) -> Self::Cast<U>
-  where
-    T: Pointee<Metadata = M>,
-    U: Pointee<Metadata = M>,
-  {
+  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(this: Self) -> Self::Cast<U> {
     let (ptr, metadata) = this.0.to_raw_parts();
     let new_value = ptr::NonNull::<UniqueData<'a, U>>::from_raw_parts(ptr as _, metadata);
     unsafe {

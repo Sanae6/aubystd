@@ -2,7 +2,7 @@ pub mod arena;
 pub mod foreign;
 
 use core::{
-  alloc::{Layout, LayoutError}, error::Error, mem::MaybeUninit, pin::Pin, ptr
+  alloc::{Layout, LayoutError}, error::Error, mem::MaybeUninit, pin::Pin, ptr::{self, Pointee}
 };
 
 #[doc(inline)]
@@ -81,6 +81,18 @@ pub trait SliceAllocator<'s, T: SliceDst + ?Sized + 's> {
     };
     Ok(unsafe { S::Handle::assume_init(slice).into() })
   }
+}
+
+pub trait LayoutAllocator {
+  type Error: Error;
+
+  async fn reserve_layout<'s, S: Strategy>(
+    &'s self,
+    layout: Layout,
+  ) -> Result<S::Handle<'s, [MaybeUninit<u8>]>, Self::Error>
+  where
+    S::Data<'s, ()>: Sized,
+    S::Data<'s, [MaybeUninit<u8>]>: Pointee<Metadata = usize>;
 }
 
 pub fn calculate_layout_for_dst<T: SliceDst + ?Sized>(element_count: usize) -> Result<Layout, LayoutError> {

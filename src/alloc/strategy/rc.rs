@@ -1,5 +1,5 @@
 use core::{
-  alloc::Layout, cell::Cell, fmt::{self, Debug, Display}, marker::{variance, CoercePointee}, mem::{forget, MaybeUninit}, ops::Deref, ptr::{self, Pointee}
+  alloc::Layout, cell::Cell, fmt::{self, Debug, Display}, marker::{variance, CoercePointee}, mem::{forget, offset_of, MaybeUninit}, ops::Deref, ptr::{self, Pointee}
 };
 
 use crate::alloc::{
@@ -28,19 +28,12 @@ impl Strategy for RcStrategy {
   unsafe fn initialize_data<'a, T: ?Sized + 'a>(free_vtable: FreeVtable<'a>, data_ptr: *mut RcData<'a, T>) {
     assert_alignment(data_ptr);
     unsafe {
+      (&raw mut (*data_ptr).ref_count).write(Cell::new(1));
       (&raw mut (*data_ptr).free_vtable).write(free_vtable);
     }
   }
 
-  fn construct_handle_sized<'a, T: 'a>(
-    ptr: ptr::NonNull<RcData<'a, MaybeUninit<T>>>,
-  ) -> Self::Handle<'a, MaybeUninit<T>> {
-    Rc(ptr, Default::default())
-  }
-
-  fn construct_handle_slice<'a, T: SliceDst + ?Sized + 'a>(
-    ptr: ptr::NonNull<RcData<'a, UnsizedMaybeUninit<T>>>,
-  ) -> Self::Handle<'a, UnsizedMaybeUninit<T>> {
+  fn construct_handle<'a, T: ?Sized + 'a>(ptr: ptr::NonNull<RcData<'a, T>>) -> Self::Handle<'a, T> {
     Rc(ptr, Default::default())
   }
 }
@@ -49,7 +42,7 @@ impl Strategy for RcStrategy {
 #[repr(transparent)]
 pub struct Rc<'a, T: ?Sized + 'a>(ptr::NonNull<RcData<'a, T>>, StrategyVariance<'a>);
 
-impl<'a, T: ?Sized> StrategyHandle<'a, T> for Rc<'a, T> {
+impl<'a, T: ?Sized + Pointee> StrategyHandle<'a, T> for Rc<'a, T> {
   type Cast<U: ?Sized + 'a> = Rc<'a, U>;
 
   fn as_value_ptr(this: &Self) -> *mut T {
@@ -57,12 +50,14 @@ impl<'a, T: ?Sized> StrategyHandle<'a, T> for Rc<'a, T> {
     unsafe { (&raw mut (*this.0.as_ptr()).value) }
   }
 
+  unsafe fn from_value_ptr(ptr: *mut T) -> Self {
+    let (ptr, metadata) = unsafe { ptr.byte_sub(offset_of!(RcData<'static, ()>, value)) }.to_raw_parts();
+    let ptr = ptr::NonNull::from_raw_parts(ptr::NonNull::new(ptr).unwrap(), metadata);
+    Rc(ptr, variance())
+  }
+
   // Casts the smart pointer to `U`
-  unsafe fn cast<U: ?Sized, M>(this: Self) -> Rc<'a, U>
-  where
-    T: Pointee<Metadata = M>,
-    U: Pointee<Metadata = M>,
-  {
+  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(this: Self) -> Rc<'a, U> {
     let (ptr, metadata) = this.0.to_raw_parts();
     let new_value = ptr::NonNull::<RcData<'a, U>>::from_raw_parts(ptr as _, metadata);
     unsafe {
@@ -94,8 +89,8 @@ impl<'a, T: ?Sized> Deref for Rc<'a, T> {
 
 impl<'a, T: Sized> Clone for Rc<'a, T> {
   fn clone(&self) -> Self {
-    let Self(ptr, phantom) = self;
-    Self(ptr.clone(), phantom.clone())
+    unsafe { self.0.as_ref() }.ref_count.update(|count| count + 1);
+    Self(self.0.clone(), variance())
   }
 }
 
@@ -110,7 +105,7 @@ impl<'a, T: ?Sized> Drop for Rc<'a, T> {
       return;
     }
 
-    data.ref_count.set(ref_count.saturating_sub(1));
+    data.ref_count.update(|count| count.saturating_sub(1));
     if ref_count == 0 {
       let layout = Layout::for_value(self.as_ref());
       // reading
@@ -148,16 +143,15 @@ impl<'a, T: SliceDst + ?Sized> UninitStrategyHandleExt<'a, UnsizedMaybeUninit<T>
 }
 
 #[cfg(test)]
+#[cfg(feature = "libc")]
 pub mod tests {
   use core::cell::Cell;
 
-  use crate::alloc::{
-    allocator::test_arena, strategy::{RcData, RcStrategy}
-  };
+  use crate::{alloc::strategy::RcStrategy, test_arena};
 
   #[pollster::test]
   async fn allocate() {
-    let arena = test_arena::<{ size_of::<RcData<Cell<u32>>>() }>();
+    let arena = test_arena!(RcStrategy, 1).await;
     let handle = arena.take::<RcStrategy>(Cell::new(42)).await.unwrap();
     assert_eq!(handle.get(), 42);
     let second_handle = handle.clone();

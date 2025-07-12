@@ -6,7 +6,7 @@ use aubystd::prelude::*;
 
 use aubystd::{
   alloc::{
-    allocator::{ArenaAllocator, ForeignAllocator, Malloc}, strategy::{Rc, RcStrategy, Unique, UniqueStrategy}, SliceAllocator, UnsizedMaybeUninit
+    SliceAllocator, UnsizedMaybeUninit, allocator::{ArenaAllocator, ForeignAllocator, Malloc}, strategy::{Rc, RcStrategy, Unique, UniqueStrategy}
   }, zerocopy::FromZeros
 };
 
@@ -78,161 +78,164 @@ impl Debug for D {
   }
 }
 
+async fn main_inner() {
+  let allocator = ForeignAllocator::<Malloc>::default();
+
+  // let handle: Unique<[u32]> = allocator
+  //   .take_from_iter(
+  //     UNIQUE,
+  //     core::iter::repeat_with(|| 5).enumerate().map(|(index, value)| value + index as u32).take(5),
+  //   )
+  //   .await
+  //   .unwrap();
+
+  // println!("{:?}", handle);
+
+  // let mut handle: Unique<A<[u32]>> = allocator.from_zeros::<UniqueStrategy>(5).await.unwrap();
+
+  // handle.value[2] = 5;
+
+  // println!("{}", handle);
+
+  let handle = allocator.take::<UniqueStrategy>([1, 2, 3, 4]).await.unwrap();
+
+  println!("{:?}", handle);
+
+  let handle: Unique<A<u32>> = allocator
+    .take::<UniqueStrategy>(A {
+      first: 3,
+      second: 4,
+      value: 5,
+    })
+    .await
+    .unwrap();
+  println!("{}", handle);
+  let handle: Unique<A<dyn Debug>> = handle;
+  println!("{}", handle);
+
+  let handle: Unique<A<[u8; 5]>> = allocator
+    .take::<UniqueStrategy>(A {
+      first: 3,
+      second: 4,
+      value: [9, 8, 7, 6, 5],
+    })
+    .await
+    .unwrap();
+  println!("{}", handle);
+  let handle: Unique<A<[u8]>> = handle;
+  println!("{}", handle);
+
+  let mut handle: Unique<UnsizedMaybeUninit<A<[u8]>>> = allocator.reserve_slice::<UniqueStrategy>(5).await.unwrap();
+
+  let handle = unsafe {
+    handle.header.write(<A<[u8]> as SliceDst>::Header {
+      first: 4,
+      second: 5,
+      value_header: (),
+    });
+    for index in 0..5 {
+      handle.slice[index].write(index as u8 + 3);
+    }
+    Unique::assume_init(handle)
+  };
+  println!("{}", handle);
+  let handle: Unique<A<[u8]>> = handle;
+  println!("{}", handle);
+
+  let mut handle: Unique<UnsizedMaybeUninit<A<D>>> = allocator.reserve_slice::<UniqueStrategy>(5).await.unwrap();
+
+  let handle = unsafe {
+    handle.header.write(<A<D> as SliceDst>::Header {
+      first: 4,
+      second: 5,
+      value_header: <D as SliceDst>::Header {
+        first: 0,
+        second: 0,
+        last_header: (),
+      },
+    });
+    for index in 0..5 {
+      handle.slice[index].write(index as u32 + 3);
+    }
+    Unique::assume_init(handle)
+  };
+  println!("{}", handle);
+
+  let mut allocation_handle: Unique<UnsafeCell<[MaybeUninit<u8>]>> =
+    allocator.from_zeros::<UniqueStrategy>(4096).await.unwrap();
+
+  {
+    let allocator = ArenaAllocator::new(&mut allocation_handle);
+    let _handle1: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
+    let _handle2: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
+    let _handle3: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
+    // unsafe { libc::printf(c"allocator remaining bytes: %d\n".as_ptr(), allocator.remaining()) }
+
+    // let _handle: Unique<[u8]> = allocator.from_zeros(1024).await.unwrap();
+    // drop((handle1, handle2, handle3));
+    // drop(allocator);
+  }
+
+  #[derive(Default)]
+  struct Tick(Cell<u32>);
+  impl Future for Tick {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+      if self.0.get() < 3 {
+        _cx.waker().wake_by_ref();
+        self.0.set(self.0.get() + 1);
+        Poll::Pending
+      } else {
+        Poll::Ready(())
+      }
+    }
+  }
+  fn tick() -> impl Future {
+    Tick::default()
+  }
+  let left: Rc<RefCell<u32>> = allocator.take::<RcStrategy>(0.into()).await.unwrap();
+  println!("value {}", left.borrow());
+  let right = left.clone();
+  futures::future::join(
+    async move {
+      *left.borrow_mut() += 1;
+      println!("left inc {}", left.borrow());
+      tick().await;
+      *left.borrow_mut() += 1;
+      println!("left inc {}", left.borrow());
+      tick().await;
+      *left.borrow_mut() += 1;
+      println!("left inc {}", left.borrow());
+      tick().await;
+    },
+    async move {
+      *right.borrow_mut() += 1;
+      println!("right inc {}", right.borrow());
+      tick().await;
+      *right.borrow_mut() += 1;
+      println!("right inc {}", right.borrow());
+      tick().await;
+      *right.borrow_mut() += 1;
+      println!("right inc {}", right.borrow());
+      tick().await;
+    },
+  )
+  .await;
+
+  let future = allocator
+    .pin::<UniqueStrategy>(async move {
+      println!("the beginning...");
+      tick().await;
+      println!("the end...");
+      42
+    })
+    .await
+    .unwrap();
+  println!("the answer {}...", future.await);
+}
+
 fn main() -> ! {
-  pollster::block_on(async move {
-    let allocator = ForeignAllocator::<Malloc>::default();
-
-    // let handle: Unique<[u32]> = allocator
-    //   .take_from_iter(
-    //     UNIQUE,
-    //     core::iter::repeat_with(|| 5).enumerate().map(|(index, value)| value + index as u32).take(5),
-    //   )
-    //   .await
-    //   .unwrap();
-
-    // println!("{:?}", handle);
-
-    // let mut handle: Unique<A<[u32]>> = allocator.from_zeros::<UniqueStrategy>(5).await.unwrap();
-
-    // handle.value[2] = 5;
-
-    // println!("{}", handle);
-
-    let handle = allocator.take::<UniqueStrategy>([1, 2, 3, 4]).await.unwrap();
-
-    println!("{:?}", handle);
-
-    let handle: Unique<A<u32>> = allocator
-      .take::<UniqueStrategy>(A {
-        first: 3,
-        second: 4,
-        value: 5,
-      })
-      .await
-      .unwrap();
-    println!("{}", handle);
-    let handle: Unique<A<dyn Debug>> = handle;
-    println!("{}", handle);
-
-    let handle: Unique<A<[u8; 5]>> = allocator
-      .take::<UniqueStrategy>(A {
-        first: 3,
-        second: 4,
-        value: [9, 8, 7, 6, 5],
-      })
-      .await
-      .unwrap();
-    println!("{}", handle);
-    let handle: Unique<A<[u8]>> = handle;
-    println!("{}", handle);
-
-    let mut handle: Unique<UnsizedMaybeUninit<A<[u8]>>> = allocator.reserve_slice::<UniqueStrategy>(5).await.unwrap();
-
-    let handle = unsafe {
-      handle.header.write(<A<[u8]> as SliceDst>::Header {
-        first: 4,
-        second: 5,
-        value_header: (),
-      });
-      for index in 0..5 {
-        handle.slice[index].write(index as u8 + 3);
-      }
-      Unique::assume_init(handle)
-    };
-    println!("{}", handle);
-    let handle: Unique<A<[u8]>> = handle;
-    println!("{}", handle);
-
-    let mut handle: Unique<UnsizedMaybeUninit<A<D>>> = allocator.reserve_slice::<UniqueStrategy>(5).await.unwrap();
-
-    let handle = unsafe {
-      handle.header.write(<A<D> as SliceDst>::Header {
-        first: 4,
-        second: 5,
-        value_header: <D as SliceDst>::Header {
-          first: 0,
-          second: 0,
-          last_header: (),
-        },
-      });
-      for index in 0..5 {
-        handle.slice[index].write(index as u32 + 3);
-      }
-      Unique::assume_init(handle)
-    };
-    println!("{}", handle);
-
-    let mut allocation_handle: Unique<UnsafeCell<[MaybeUninit<u8>]>> = allocator.from_zeros::<UniqueStrategy>(4096).await.unwrap();
-
-    {
-      let allocator = ArenaAllocator::new(&mut allocation_handle);
-      let _handle1: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
-      let _handle2: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
-      let _handle3: Unique<[u8]> = allocator.from_zeros::<UniqueStrategy>(1024).await.unwrap();
-      // unsafe { libc::printf(c"allocator remaining bytes: %d\n".as_ptr(), allocator.remaining()) }
-
-      // let _handle: Unique<[u8]> = allocator.from_zeros(1024).await.unwrap();
-      // drop((handle1, handle2, handle3));
-      // drop(allocator);
-    }
-
-    #[derive(Default)]
-    struct Tick(Cell<u32>);
-    impl Future for Tick {
-      type Output = ();
-
-      fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.0.get() < 3 {
-          _cx.waker().wake_by_ref();
-          self.0.set(self.0.get() + 1);
-          Poll::Pending
-        } else {
-          Poll::Ready(())
-        }
-      }
-    }
-    fn tick() -> impl Future {
-      Tick::default()
-    }
-    let left: Rc<RefCell<u32>> = allocator.take::<RcStrategy>(0.into()).await.unwrap();
-    let right = left.clone();
-    futures::future::join(
-      async move {
-        *left.borrow_mut() += 1;
-        println!("left inc {}", left.borrow());
-        tick().await;
-        *left.borrow_mut() += 1;
-        println!("left inc {}", left.borrow());
-        tick().await;
-        *left.borrow_mut() += 1;
-        println!("left inc {}", left.borrow());
-        tick().await;
-      },
-      async move {
-        *right.borrow_mut() += 1;
-        println!("right inc {}", right.borrow());
-        tick().await;
-        *right.borrow_mut() += 1;
-        println!("right inc {}", right.borrow());
-        tick().await;
-        *right.borrow_mut() += 1;
-        println!("right inc {}", right.borrow());
-        tick().await;
-      },
-    )
-    .await;
-
-    let future = allocator
-      .pin::<UniqueStrategy>(async move {
-        println!("the beginning...");
-        tick().await;
-        println!("the end...");
-        42
-      })
-      .await
-      .unwrap();
-    println!("the answer {}...", future.await);
-  });
-
+  pollster::block_on(main_inner());
   unsafe { libc::exit(0) }
 }
