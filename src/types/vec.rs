@@ -48,13 +48,13 @@ impl<T, V: AsRef<[MaybeUninit<T>]> + ?Sized> Deref for BaseVec<T, V> {
   type Target = [T];
 
   fn deref(&self) -> &[T] {
-    unsafe { std::mem::transmute(self.values.as_ref()) }
+    unsafe { core::mem::transmute(self.values.as_ref()) }
   }
 }
 
 impl<T, V: AsRef<[MaybeUninit<T>]> + AsMut<[MaybeUninit<T>]> + ?Sized> DerefMut for BaseVec<T, V> {
   fn deref_mut(&mut self) -> &mut [T] {
-    unsafe { std::mem::transmute(self.values.as_mut()) }
+    unsafe { core::mem::transmute(self.values.as_mut()) }
   }
 }
 
