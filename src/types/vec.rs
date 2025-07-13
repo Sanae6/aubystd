@@ -1,5 +1,5 @@
 use core::{
-  array, marker::PhantomData, mem::MaybeUninit, ops::{Deref, DerefMut, Index}
+  array, marker::PhantomData, mem::MaybeUninit, ops::{Deref, DerefMut}
 };
 
 use aubystd_macros::slice_dst;

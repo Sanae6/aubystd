@@ -1,6 +1,3 @@
-// could have pulled in itertools but it really doesn't matter
-#![feature(iter_intersperse)]
-
 use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{
