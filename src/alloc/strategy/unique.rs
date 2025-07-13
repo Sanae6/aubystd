@@ -1,19 +1,19 @@
 use core::{
-  alloc::Layout, borrow::{Borrow, BorrowMut}, fmt::{self, Debug, Display}, marker::{CoercePointee, variance}, mem::{MaybeUninit, forget, offset_of}, ops::{Deref, DerefMut, DerefPure}, pin::Pin, ptr::{self, Pointee}
+  alloc::Layout, borrow::{Borrow, BorrowMut}, fmt::{self, Debug, Display}, marker::{CoercePointee, variance}, mem::{forget, offset_of}, ops::{Deref, DerefMut, DerefPure}, pin::Pin, ptr::{self, Pointee}
 };
 
-use crate::alloc::{
-  UnsizedMaybeUninit, strategy::{PinStrategyHandle, StrategyVariance, assert_alignment}
-};
+use aubystd_macros::slice_dst;
 
-use super::{FreeVtable, SliceDst, Strategy, StrategyHandle, UninitStrategyHandleExt};
+use crate::alloc::strategy::{PinStrategyHandle, StrategyVariance, UninitType, assert_alignment};
+
+use super::{FreeVtable, Strategy, StrategyHandle, UninitStrategyHandleExt};
 
 #[derive(Default)]
 pub struct UniqueStrategy;
 pub const UNIQUE: UniqueStrategy = UniqueStrategy;
 
+#[slice_dst(header = UniqueDataHeader)]
 #[doc(hidden)]
-#[derive(SliceDst)]
 #[repr(C)]
 pub struct UniqueData<'a, T: ?Sized> {
   free_vtable: FreeVtable<'a>,
@@ -23,6 +23,7 @@ pub struct UniqueData<'a, T: ?Sized> {
 impl Strategy for UniqueStrategy {
   type Data<'a, T: ?Sized + 'a> = UniqueData<'a, T>;
   type Handle<'a, T: ?Sized + 'a> = Unique<'a, T>;
+  type UninitHandle<'a, T: UninitType + ?Sized + 'a> = Unique<'a, T>;
 
   /// Safety: data_ptr must be aligned and point to valid memory
   unsafe fn initialize_data<'a, T: ?Sized + 'a>(free_vtable: FreeVtable<'a>, data_ptr: *mut Self::Data<'a, T>) {
@@ -81,8 +82,8 @@ impl<'a, T: ?Sized + Pointee> StrategyHandle<'a, T> for Unique<'a, T> {
   }
 
   // Casts the smart pointer to `U`
-  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(this: Self) -> Self::Cast<U> {
-    let (ptr, metadata) = this.0.to_raw_parts();
+  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(metadata: T::Metadata, this: Self) -> Self::Cast<U> {
+    let (ptr, _) = this.0.to_raw_parts();
     let new_value = ptr::NonNull::<UniqueData<'a, U>>::from_raw_parts(ptr as _, metadata);
     unsafe {
       assert_eq!(
@@ -160,21 +161,11 @@ impl<'a, T: Display + ?Sized> Display for Unique<'a, T> {
   }
 }
 
-impl<'a, T> UninitStrategyHandleExt<'a, MaybeUninit<T>> for Unique<'a, MaybeUninit<T>> {
-  type Init = Unique<'a, T>;
+impl<'a, U: UninitType + ?Sized> UninitStrategyHandleExt<'a, U> for Unique<'a, U> {
+  type Init = Unique<'a, U::Init>;
 
   unsafe fn assume_init(this: Self) -> Self::Init {
-    unsafe { Unique::cast(this) }
-  }
-}
-
-impl<'a, T: SliceDst + ?Sized> UninitStrategyHandleExt<'a, UnsizedMaybeUninit<T>>
-  for Unique<'a, UnsizedMaybeUninit<T>>
-{
-  type Init = Unique<'a, T>;
-
-  unsafe fn assume_init(this: Self) -> Self::Init {
-    unsafe { Unique::cast(this) }
+    unsafe { Self::cast(this.0.to_raw_parts().1, this) }
   }
 }
 

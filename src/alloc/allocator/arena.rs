@@ -1,5 +1,5 @@
 use core::{
-  alloc::Layout, cell::{Cell, SyncUnsafeCell, UnsafeCell}, mem::MaybeUninit, ops::Deref, ptr::{self, NonNull, Pointee}
+  alloc::Layout, cell::{Cell, SyncUnsafeCell, UnsafeCell}, mem::MaybeUninit, ops::Deref, ptr
 };
 
 use crate::alloc::{
@@ -26,7 +26,7 @@ impl<A: UnsafeCellBuffer> ArenaAllocator<A> {
     self.len() - self.head.get()
   }
 
-  fn fetch_head_ptr<'s, S: Strategy>(&'s self, layout: Layout) -> Result<*mut (), OutOfMemory> {
+  fn fetch_head_ptr<'s, S: Strategy>(&'s self, layout: Layout) -> Result<ptr::NonNull<()>, OutOfMemory> {
     // Safety: buffer ptr + head < buffer end ptr, never overflows
     let alignment_offset = unsafe { self.data.get().cast::<u8>().add(self.head.get()).align_offset(layout.align()) };
 
@@ -43,22 +43,24 @@ impl<A: UnsafeCellBuffer> ArenaAllocator<A> {
     }
 
     let head = self.head.replace(new_head) + alignment_offset;
-    Ok(unsafe { self.data.get().byte_add(head).cast() })
+
+    // Safety: data ptr can never be null
+    Ok(unsafe { ptr::NonNull::new_unchecked(self.data.get().byte_add(head).cast()) })
   }
 }
 
 impl<'s, T: 's, A: UnsafeCellBuffer> Allocator<'s, T> for ArenaAllocator<A> {
   type Error = OutOfMemory;
 
-  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::Handle<'s, MaybeUninit<T>>, OutOfMemory>
+  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::UninitHandle<'s, MaybeUninit<T>>, OutOfMemory>
   where
     S::Data<'s, MaybeUninit<T>>: Sized,
   {
     let ptr = self.fetch_head_ptr::<S>(Layout::new::<S::Data<'s, MaybeUninit<T>>>())?.cast();
 
-    unsafe { S::initialize_data(FreeVtable::new_empty(), ptr) };
+    unsafe { S::initialize_data(FreeVtable::new_empty(), ptr.as_ptr()) };
 
-    Ok(S::construct_handle(unsafe { NonNull::new_unchecked(ptr) }))
+    Ok(S::construct_handle(ptr))
   }
 }
 
@@ -67,18 +69,18 @@ impl<'s, T: SliceDst + ?Sized + 's, A: UnsafeCellBuffer> SliceAllocator<'s, T> f
   async fn reserve_slice<S: Strategy>(
     &'s self,
     length: usize,
-  ) -> Result<S::Handle<'s, UnsizedMaybeUninit<T>>, OutOfMemory>
+  ) -> Result<S::UninitHandle<'s, UnsizedMaybeUninit<T>>, OutOfMemory>
   where
     S::Data<'s, UnsizedMaybeUninit<T>>: SliceDst,
   {
     let layout = calculate_layout_for_dst::<S::Data<'s, UnsizedMaybeUninit<T>>>(length).map_err(|_| OutOfMemory)?;
 
     let ptr = self.fetch_head_ptr::<S>(layout)?;
-    let ptr = ptr::from_raw_parts_mut(ptr.cast::<u8>(), length);
+    let ptr: ptr::NonNull<S::Data<'s, UnsizedMaybeUninit<T>>> = ptr::NonNull::from_raw_parts(ptr, length);
 
-    unsafe { S::initialize_data(FreeVtable::new_empty(), ptr) };
+    unsafe { S::initialize_data(FreeVtable::new_empty(), ptr.as_ptr()) };
 
-    Ok(S::construct_handle(unsafe { NonNull::new_unchecked(ptr) }))
+    Ok(S::construct_handle(ptr))
   }
 }
 
@@ -91,15 +93,16 @@ impl<A: UnsafeCellBuffer> LayoutAllocator for ArenaAllocator<A> {
   ) -> Result<S::Handle<'s, [MaybeUninit<u8>]>, Self::Error>
   where
     S::Data<'s, ()>: Sized,
-    S::Data<'s, [MaybeUninit<u8>]>: Pointee<Metadata = usize>,
   {
     let new_layout = Layout::new::<S::Data<'s, ()>>().extend(layout).map_err(|_| OutOfMemory)?.0.pad_to_align();
     let ptr = self.fetch_head_ptr::<S>(new_layout)?;
-    let ptr = ptr::from_raw_parts_mut(ptr.cast::<u8>(), new_layout.size());
+    let ptr: ptr::NonNull<S::Data<'s, UnsizedMaybeUninit<[MaybeUninit<u8>]>>> =
+      ptr::NonNull::from_raw_parts(ptr, new_layout.size());
 
-    unsafe { S::initialize_data(FreeVtable::new_empty(), ptr) };
+    unsafe { S::initialize_data(FreeVtable::new_empty(), ptr.as_ptr()) };
 
-    Ok(S::construct_handle(unsafe { NonNull::new_unchecked(ptr) }))
+    let handle: S::UninitHandle<'s, _> = S::construct_handle(ptr);
+    Ok(unsafe { S::UninitHandle::assume_init(handle) })
   }
 }
 

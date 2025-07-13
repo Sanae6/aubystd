@@ -48,7 +48,7 @@ impl<C: CStyleAllocator> ForeignAllocator<C> {
 impl<'s, T: 's, C: CStyleAllocator> Allocator<'s, T> for ForeignAllocator<C> {
   type Error = OutOfMemory;
 
-  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::Handle<'s, MaybeUninit<T>>, OutOfMemory>
+  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::UninitHandle<'s, MaybeUninit<T>>, OutOfMemory>
   where
     S::Data<'s, MaybeUninit<T>>: Sized,
   {
@@ -70,7 +70,7 @@ impl<'s, T: SliceDst + ?Sized + 's, C: CStyleAllocator> SliceAllocator<'s, T> fo
   async fn reserve_slice<S: Strategy>(
     &'s self,
     length: usize,
-  ) -> Result<S::Handle<'s, UnsizedMaybeUninit<T>>, OutOfMemory>
+  ) -> Result<S::UninitHandle<'s, UnsizedMaybeUninit<T>>, OutOfMemory>
   where
     S::Data<'s, UnsizedMaybeUninit<T>>: SliceDst,
   {
@@ -99,12 +99,14 @@ impl<C: CStyleAllocator> LayoutAllocator for ForeignAllocator<C> {
   {
     let new_layout = Layout::new::<S::Data<'s, ()>>().extend(layout).map_err(|_| OutOfMemory)?.0.pad_to_align();
     let data_ptr = self.allocator.alloc(new_layout)?;
-    let data_ptr: ptr::NonNull<S::Data<'s, [MaybeUninit<u8>]>> = ptr::NonNull::from_raw_parts(data_ptr, new_layout.size());
+    let data_ptr: ptr::NonNull<S::Data<'s, UnsizedMaybeUninit<[MaybeUninit<u8>]>>> =
+      ptr::NonNull::from_raw_parts(data_ptr, new_layout.size());
 
     // Safety: alloc only returns valid, well aligned pointers for the provided layout
     unsafe { S::initialize_data(self.create_free_vtable(), data_ptr.as_ptr()) };
 
-    Ok(S::construct_handle(data_ptr))
+    let handle: S::UninitHandle<'s, UnsizedMaybeUninit<[MaybeUninit<u8>]>> = S::construct_handle(data_ptr);
+    Ok(unsafe { S::UninitHandle::assume_init(handle) })
   }
 }
 

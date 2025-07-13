@@ -1,19 +1,19 @@
 use core::{
-  alloc::Layout, cell::Cell, fmt::{self, Debug, Display}, marker::{variance, CoercePointee}, mem::{forget, offset_of, MaybeUninit}, ops::Deref, ptr::{self, Pointee}
+  alloc::Layout, cell::Cell, fmt::{self, Debug, Display}, marker::{CoercePointee, variance}, mem::{forget, offset_of}, ops::Deref, ptr::{self, Pointee}
 };
 
-use crate::alloc::{
-  UnsizedMaybeUninit, strategy::{StrategyVariance, assert_alignment}
-};
+use aubystd_macros::slice_dst;
 
-use super::{FreeVtable, SliceDst, Strategy, StrategyHandle, UninitStrategyHandleExt};
+use crate::alloc::strategy::{StrategyVariance, UninitType, assert_alignment};
+
+use super::{FreeVtable, Strategy, StrategyHandle, UninitStrategyHandleExt};
 
 #[derive(Default)]
 pub struct RcStrategy;
 pub const RC: RcStrategy = RcStrategy;
 
+#[slice_dst(header = RcDataHeader)]
 #[doc(hidden)]
-#[derive(SliceDst)]
 #[repr(C)]
 pub struct RcData<'a, T: ?Sized> {
   free_vtable: FreeVtable<'a>,
@@ -24,6 +24,7 @@ pub struct RcData<'a, T: ?Sized> {
 impl Strategy for RcStrategy {
   type Data<'a, T: ?Sized + 'a> = RcData<'a, T>;
   type Handle<'a, T: ?Sized + 'a> = Rc<'a, T>;
+  type UninitHandle<'a, T: UninitType + ?Sized + 'a> = Rc<'a, T>;
 
   unsafe fn initialize_data<'a, T: ?Sized + 'a>(free_vtable: FreeVtable<'a>, data_ptr: *mut RcData<'a, T>) {
     assert_alignment(data_ptr);
@@ -57,8 +58,8 @@ impl<'a, T: ?Sized + Pointee> StrategyHandle<'a, T> for Rc<'a, T> {
   }
 
   // Casts the smart pointer to `U`
-  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(this: Self) -> Rc<'a, U> {
-    let (ptr, metadata) = this.0.to_raw_parts();
+  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(metadata: T::Metadata, this: Self) -> Rc<'a, U> {
+    let (ptr, _) = this.0.to_raw_parts();
     let new_value = ptr::NonNull::<RcData<'a, U>>::from_raw_parts(ptr as _, metadata);
     unsafe {
       assert_eq!(
@@ -126,19 +127,11 @@ impl<'a, T: Display + ?Sized> Display for Rc<'a, T> {
   }
 }
 
-impl<'a, T> UninitStrategyHandleExt<'a, MaybeUninit<T>> for Rc<'a, MaybeUninit<T>> {
-  type Init = Rc<'a, T>;
+impl<'a, U: UninitType + ?Sized> UninitStrategyHandleExt<'a, U> for Rc<'a, U> {
+  type Init = Rc<'a, U::Init>;
 
   unsafe fn assume_init(this: Self) -> Self::Init {
-    unsafe { Self::cast(this) }
-  }
-}
-
-impl<'a, T: SliceDst + ?Sized> UninitStrategyHandleExt<'a, UnsizedMaybeUninit<T>> for Rc<'a, UnsizedMaybeUninit<T>> {
-  type Init = Rc<'a, T>;
-
-  unsafe fn assume_init(this: Self) -> Self::Init {
-    unsafe { Self::cast(this) }
+    unsafe { Self::cast(this.0.to_raw_parts().1, this) }
   }
 }
 

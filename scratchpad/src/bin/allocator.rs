@@ -6,7 +6,7 @@ use aubystd::prelude::*;
 
 use aubystd::{
   alloc::{
-    SliceAllocator, UnsizedMaybeUninit, allocator::{ArenaAllocator, ForeignAllocator, Malloc}, strategy::{Rc, RcStrategy, Unique, UniqueStrategy}
+    allocator::{ArenaAllocator, ForeignAllocator, Malloc}, slice_dst, strategy::{Rc, RcStrategy, Unique, UniqueStrategy}, SliceAllocator, UnsizedMaybeUninit
   }, zerocopy::FromZeros
 };
 
@@ -14,7 +14,8 @@ use core::{
   cell::{Cell, RefCell, UnsafeCell}, fmt::{Debug, Display}, mem::MaybeUninit, pin::Pin, task::{Context, Poll}
 };
 
-#[derive(SliceDst, FromZeros)]
+#[slice_dst(header = AHeader, derive(FromZeros))]
+#[derive(FromZeros)]
 #[repr(C)]
 #[zerocopy(crate = "aubystd::zerocopy")]
 struct A<T: Debug + ?Sized> {
@@ -29,7 +30,7 @@ impl<T: Debug + ?Sized> Display for A<T> {
   }
 }
 
-#[derive(SliceDst)]
+#[slice_dst(header = BHeader)]
 #[repr(C)]
 struct B<A: Debug> {
   #[allow(unused)]
@@ -39,7 +40,7 @@ struct B<A: Debug> {
   last: A,
 }
 
-#[derive(SliceDst)]
+#[slice_dst(header = CHeader)]
 #[repr(C)]
 struct C<A: Debug> {
   #[allow(unused)]
@@ -51,7 +52,7 @@ struct C<A: Debug> {
   last: [u32],
 }
 
-#[derive(SliceDst)]
+#[slice_dst(header = DHeader)]
 #[repr(C)]
 struct D {
   #[allow(unused)]
@@ -91,11 +92,11 @@ async fn main_inner() {
 
   // println!("{:?}", handle);
 
-  // let mut handle: Unique<A<[u32]>> = allocator.from_zeros::<UniqueStrategy>(5).await.unwrap();
+  let mut handle: Unique<A<[u32]>> = allocator.from_zeros::<UniqueStrategy>(5).await.unwrap();
 
-  // handle.value[2] = 5;
+  handle.value[2] = 5;
 
-  // println!("{}", handle);
+  println!("{}", handle);
 
   let handle = allocator.take::<UniqueStrategy>([1, 2, 3, 4]).await.unwrap();
 

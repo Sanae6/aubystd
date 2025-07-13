@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "dst"
+name = "allocator"
+[[bin]]
+name = "types"
 
 [dependencies]
 aubystd = { version = "0.1.0", path = "..", features = ["libc", "debugging"] }

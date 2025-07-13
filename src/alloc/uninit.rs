@@ -1,7 +1,9 @@
+use aubystd_macros::slice_dst;
+
 use crate::alloc::SliceDst;
 use core::{mem::MaybeUninit, ptr};
 
-#[derive(SliceDst)]
+#[slice_dst(header = UnsizedMaybeUninitHeader)]
 #[repr(C)]
 pub struct UnsizedMaybeUninit<T: SliceDst + ?Sized> {
   pub header: MaybeUninit<T::Header>,

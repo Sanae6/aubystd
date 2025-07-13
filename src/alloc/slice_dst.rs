@@ -1,11 +1,11 @@
 use core::{cell::UnsafeCell, ptr::Pointee};
 
-pub use aubystd_macros::SliceDst;
+pub use aubystd_macros::slice_dst;
 
 // todo: describe unsafe contract (repr assertion, used for allocations so must match type)
 pub unsafe trait SliceDst: Pointee<Metadata = usize> {
-  type Header;
-  type Element;
+  type Header: Pointee<Metadata = ()>;
+  type Element: Pointee<Metadata = ()>;
 
   fn addr_of_slice(ptr: *mut Self) -> *mut [Self::Element];
 }

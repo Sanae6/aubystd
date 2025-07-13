@@ -1,43 +1,107 @@
-use proc_macro2::{Span, TokenStream};
-use quote::{ToTokens, quote};
+// could have pulled in itertools but it really doesn't matter
+#![feature(iter_intersperse)]
+
+use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
+use quote::{ToTokens, quote, quote_spanned};
 use syn::{
-  Attribute, DeriveInput, GenericParam, Ident, Lifetime, Visibility, parse_macro_input, parse_quote, spanned::Spanned, token::Pub, visit::Visit
+  DeriveInput, GenericParam, Ident, Lifetime, Token, Type, parse::{Parse, ParseStream, Parser}, parse_macro_input, parse_quote, punctuated::Punctuated, spanned::Spanned, visit::Visit
 };
 
-fn find_crate_name(attrs: &[Attribute]) -> syn::Result<TokenStream> {
-  attrs
+type MetaPunct = Punctuated<Metadata, Token![,]>;
+fn find_meta_kv(meta: &MetaPunct, key: &str) -> syn::Result<Option<(Span, TokenTree)>> {
+  meta
     .iter()
     .find_map(|attr| {
-      if !attr.path().is_ident("aubystd_crate") {
-        return None;
+      if attr.key() == key {
+        return if let Metadata::KeyValue { span, value, .. } = attr {
+          Some(Ok((span.clone(), value.clone())))
+        } else {
+          Some(Err(syn::Error::new(attr.key().span(), "expected key value pair")))
+        };
       }
-
-      Some(
-        attr.meta.require_list().map(|meta| meta.tokens.clone()).map(|crate_name| {
-          if crate_name.to_string() != "crate" {
-            quote!(::#crate_name)
-          } else {
-            crate_name
-          }
-        }),
-      )
+      None
     })
-    .unwrap_or_else(|| {
-      Ok(match proc_macro_crate::crate_name("aubystd").unwrap() {
+    .transpose()
+}
+fn find_meta_list(meta: &MetaPunct, key: &str) -> syn::Result<Option<(Span, Punctuated<TokenTree, Token![,]>)>> {
+  meta
+    .iter()
+    .find_map(|attr| {
+      if attr.key() == key {
+        return if let Metadata::List { span, values, .. } = attr {
+          Some(Ok((span.clone(), values.clone())))
+        } else {
+          Some(Err(syn::Error::new(attr.key().span(), "expected list")))
+        };
+      }
+      None
+    })
+    .transpose()
+}
+
+fn find_crate_name(meta: &MetaPunct) -> syn::Result<TokenStream> {
+  Ok(
+    find_meta_kv(meta, "crate")?.map(|(_, value)| value.into_token_stream()).unwrap_or_else(|| {
+      match proc_macro_crate::crate_name("aubystd").unwrap() {
         proc_macro_crate::FoundCrate::Itself => quote!(crate),
         proc_macro_crate::FoundCrate::Name(name) => {
           let name = Ident::new(&name, Span::call_site());
           quote!(::#name)
         }
-      })
-    })
+      }
+    }),
+  )
 }
 
-#[proc_macro_derive(SliceDst, attributes(aubystd_crate))]
-pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-  let input = parse_macro_input!(item as DeriveInput);
+enum Metadata {
+  KeyValue {
+    span: Span,
+    key: Ident,
+    value: TokenTree,
+  },
+  List {
+    span: Span,
+    key: Ident,
+    values: Punctuated<TokenTree, Token![,]>,
+  },
+}
+impl Metadata {
+  pub fn key(&self) -> &Ident {
+    match self {
+      Metadata::KeyValue { key, .. } => key,
+      Metadata::List { key, .. } => key,
+    }
+  }
+}
+impl Parse for Metadata {
+  fn parse(input: ParseStream) -> syn::Result<Self> {
+    let key: Ident = input.parse()?;
+    if input.peek(Token![=]) {
+      let _: Token![=] = input.parse()?;
+      let value: TokenTree = input.parse()?;
+      let span = Span::join(&key.span(), value.span()).unwrap();
+      Ok(Metadata::KeyValue { span, key, value })
+    } else if let Ok(list) = input.step(|c| {
+      let x = c.group(Delimiter::Parenthesis).ok_or(syn::Error::new(Span::call_site(), "parens"))?;
+      Ok((x.0.token_stream(), x.2))
+    }) {
+      let values = Punctuated::parse_terminated.parse2(list)?;
+      let span = Span::join(&key.span(), values.span()).unwrap();
+      Ok(Metadata::List { span, key, values })
+    } else {
+      Err(syn::Error::new(
+        input.span(),
+        format!("invalid attribute argument \"{key}\""),
+      ))
+    }
+  }
+}
 
+#[proc_macro_attribute]
+pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
   fn slice_dst_derive(
+    attr: TokenStream,
+    item: TokenStream,
     DeriveInput {
       attrs,
       vis,
@@ -46,7 +110,31 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
       data,
     }: DeriveInput,
   ) -> syn::Result<TokenStream> {
-    let crate_name = find_crate_name(&attrs)?;
+    let meta: Punctuated<Metadata, Token![,]> = if attr.is_empty() {
+      Punctuated::new()
+    } else {
+      Punctuated::parse_separated_nonempty.parse2(attr)?
+    };
+    let _: () = meta
+      .iter()
+      .filter_map(|x| {
+        ["header", "derive", "crate"]
+          .iter()
+          .all(|key| *x.key() != *key)
+          .then(|| syn::Error::new(x.key().span(), format!("invalid argument: {}", x.key())))
+      })
+      .reduce(|mut left, right| {
+        left.combine(right);
+        left
+      })
+      .map(|err| Err(err))
+      .transpose()?
+      .unwrap_or_default();
+
+    let crate_name = find_crate_name(&meta)?;
+
+    let attrs: Vec<_> = attrs.into_iter().filter(|attr| !attr.path().is_ident("derive")).collect();
+    let derive = find_meta_list(&meta, "derive")?.unwrap_or((Span::call_site(), parse_quote!()));
 
     let syn::Data::Struct(data_struct) = data else {
       return Err(syn::Error::new(ident.span(), "only structs are supported"));
@@ -101,10 +189,10 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
       ),
       syn::Fields::Unit => return Err(syn::Error::new(ident.span(), "unit structs cannot be slice DSTs")),
     };
-    let fields = fields.map(|mut field| {
-      field.vis = Visibility::Public(Pub(Span::call_site()));
-      field
-    });
+    // let fields = fields.map(|mut field| {
+    //   field.vis = Visibility::Public(Pub(Span::call_site()));
+    //   field
+    // });
 
     let Some(last) = last else {
       return Err(syn::Error::new(
@@ -113,42 +201,16 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
       ));
     };
 
-    struct TypeParamVisitor<'ast> {
-      type_param_ident: &'ast Ident,
-      used_type_params: Vec<Ident>,
-    }
-
-    impl<'ast> Visit<'ast> for TypeParamVisitor<'ast> {
-      fn visit_ident(&mut self, ident: &'ast proc_macro2::Ident) {
-        if self.type_param_ident == ident {
-          self.used_type_params.push(ident.clone());
-        }
-      }
-    }
-
-    if let Some(used_type_params) = generics.type_params().find_map(|param| {
-      let mut visitor = TypeParamVisitor {
-        type_param_ident: &param.ident,
-        used_type_params: vec![],
-      };
-      visitor.visit_type_param(param);
-      (visitor.used_type_params.len() > 0).then_some(visitor.used_type_params)
-    }) {
-      // we have generic params in the last field's type
-      for param_type in used_type_params {
-        for ele in generics.type_params_mut() {
-          if ele.ident == param_type {
-            ele.bounds.push(parse_quote!(#crate_name::alloc::SliceDst));
-            break;
-          }
-        }
-      }
-    }
-
     let last_ty = last.ty;
 
     let header_name = match fields.len() {
-      1.. => Ident::new(&format!("{ident}Header"), Span::call_site()).to_token_stream(),
+      1.. => {
+        // Ident::new(&format!("{ident}Header"), Span::call_site()).to_token_stream()
+
+        let (_, header) =
+          find_meta_kv(&meta, "header")?.ok_or(syn::Error::new(Span::call_site(), "must have a header name"))?;
+        header.to_token_stream()
+      }
       // 1 => fields.clone().next().unwrap().ty.to_token_stream(),
       0 => quote!(()),
     };
@@ -180,8 +242,6 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
     let header = if fields.len() < 1 {
       quote!()
     } else {
-      let mut generics = generics.clone();
-
       struct UnusedGenerics {
         used_params: Vec<Ident>,
         used_lifetimes: Vec<Lifetime>,
@@ -201,10 +261,18 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
         used_lifetimes: vec![],
         used_params: vec![],
       };
+      // return Err(syn::Error::new(Span::call_site(), format!("fuck you {last_ty:?}")));
+      unused_generics.visit_type(&last_ty);
+      if !matches!(last_ty, Type::Slice(_)) && unused_generics.used_params.len() == 1 {
+        for param_name in &unused_generics.used_params {
+          if let Some(param) = generics.type_params_mut().find(|param| param.ident == *param_name) {
+            param.bounds.push(parse_quote!(#crate_name::alloc::SliceDst));
+          }
+        }
+      };
       for ele in fields_unused {
         unused_generics.visit_field(&ele);
       }
-      unused_generics.visit_type(&last_ty);
 
       generics.params = generics
         .params
@@ -216,12 +284,16 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
         })
         .collect();
 
+      let (derive_span, derives) = derive;
+      let derives = derives.iter();
+      let derive = quote_spanned! {derive_span=>#[derive(#(#derives),*)]};
       match fields_kind {
         FieldsKind::Named => {
           let last_ident_header = Ident::new(&format!("{last_ident}_header"), Span::call_site());
           quote! {
             #[doc(hidden)]
-            #(#[repr(#reprs)])*
+            #derive
+            #(#attrs)*
             #vis struct #header_name #generics {
               #(#fields,)*
               pub #last_ident_header: <#last_ty as #crate_name::alloc::SliceDst>::Header
@@ -231,6 +303,8 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
         FieldsKind::Unnamed => {
           quote! {
             #[doc(hidden)]
+            #derive
+            #(#attrs)*
             #vis struct #header_name #generics (#(#fields,)* <#last_ty as #crate_name::alloc::SliceDst>::Header);
           }
         }
@@ -240,6 +314,7 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     Ok(quote! {
+      #item
       #header
 
       unsafe impl #impl_generics #crate_name::alloc::SliceDst for #ident #ty_generics #where_clause {
@@ -253,7 +328,9 @@ pub fn slice_dst_derive(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
     })
   }
 
-  match slice_dst_derive(input) {
+  let input_item = item.clone();
+  let input = parse_macro_input!(input_item as DeriveInput);
+  match slice_dst_derive(attr.into(), item.into(), input) {
     Ok(output) => output.into(),
     Err(error) => error.into_compile_error().into(),
   }

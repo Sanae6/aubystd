@@ -21,7 +21,9 @@ pub extern crate std;
 pub mod alloc;
 pub mod io;
 pub mod num;
+pub mod types;
 pub use zerocopy;
+
 
 pub mod prelude {
   pub use crate::alloc::{
