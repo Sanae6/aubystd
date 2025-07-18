@@ -333,7 +333,8 @@ pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
   }
 }
 
+/// For things that need to be named, but don't have a nice name yet
 #[proc_macro_attribute]
-pub fn epic(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn aubystd_bikeshed_name(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
   item
 }

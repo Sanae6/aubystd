@@ -26,6 +26,8 @@ where
   }
 }
 
+pub type SliceVec<T> = BaseVec<T, [MaybeUninit<T>]>;
+
 pub type FixedVec<T, const CAPACITY: usize> = BaseVec<T, [MaybeUninit<T>; CAPACITY]>;
 
 impl<T, const CAPACITY: usize> FixedVec<T, CAPACITY> {
@@ -101,13 +103,27 @@ impl<T, V: AsRef<[MaybeUninit<T>]> + ?Sized> BaseVec<T, V> {
 
 impl<T, V: AsRef<[MaybeUninit<T>]> + AsMut<[MaybeUninit<T>]> + ?Sized> BaseVec<T, V> {
   pub fn push(&mut self, value: T) -> Result<(), T> {
-    if self.values.as_ref().len() < self.length + 1 {
+    if self.capacity() < self.len() + 1 {
       return Err(value);
     }
 
-    self.values.as_mut()[self.length].write(value);
+    let index = self.len();
+    self.values.as_mut()[index].write(value);
     self.length += 1;
 
     Ok(())
+  }
+
+  pub fn pop(&mut self) -> Option<T> {
+    if self.len() == 0 {
+      return None;
+    }
+
+    let index = self.length - 1;
+    // Safety: known to be initialized at index, since length > 0
+    let value = unsafe { self.values.as_mut()[index].assume_init_read() };
+    self.length = index;
+
+    Some(value)
   }
 }

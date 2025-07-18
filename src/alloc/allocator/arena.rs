@@ -132,7 +132,6 @@ impl<T: UnsafeCellBuffer + ?Sized, D: Deref<Target = T>> UnsafeCellBuffer for D 
 #[cfg(feature = "libc")]
 mod tests {
   use core::{cell::UnsafeCell, mem::MaybeUninit};
-  use std::assert_matches::assert_matches;
 
   use crate::alloc::{
     ForeignAllocator, Malloc, SliceAllocator, UnsafeCellBuffer, allocator::{ArenaAllocator, OutOfMemory}, strategy::{Strategy, Unique, UniqueStrategy}
@@ -169,7 +168,7 @@ mod tests {
     let _handle = arena.take::<UniqueStrategy>(5u32).await.unwrap();
     // let _handle = arena.take::<UniqueStrategy>(5u32).await.unwrap();
     let result = arena.take::<UniqueStrategy>(5u32).await;
-    assert_matches!(result, Err(OutOfMemory));
+    assert!(matches!(result, Err(OutOfMemory)));
   }
 
   #[pollster::test]
@@ -177,28 +176,28 @@ mod tests {
     let arena = test_arena!(UniqueStrategy, 1).await;
     let _: Unique<u32> = arena.take::<UniqueStrategy>(1).await.unwrap();
     let result: Result<Unique<u32>, _> = arena.take::<UniqueStrategy>(1).await;
-    assert_matches!(result, Err(OutOfMemory));
+    assert!(matches!(result, Err(OutOfMemory)));
   }
 
   #[pollster::test]
   async fn allocate_item_oom() {
     let arena = test_arena!(UniqueStrategy, 0).await;
     let result: Result<Unique<u8>, _> = arena.take::<UniqueStrategy>(1).await;
-    assert_matches!(result, Err(OutOfMemory));
+    assert!(matches!(result, Err(OutOfMemory)));
   }
 
   #[pollster::test]
   async fn allocate_dst_oom() {
     let arena = test_arena!(UniqueStrategy, 0).await;
     let result: Result<Unique<[u8]>, _> = arena.from_zeros::<UniqueStrategy>(1).await;
-    assert_matches!(result, Err(OutOfMemory));
+    assert!(matches!(result, Err(OutOfMemory)));
   }
 
   #[pollster::test]
   async fn allocate_dst_overflow() {
     let arena = test_arena!(UniqueStrategy, 0).await;
     let result: Result<Unique<[u32]>, _> = arena.from_zeros::<UniqueStrategy>(usize::MAX).await;
-    assert_matches!(result, Err(OutOfMemory));
+    assert!(matches!(result, Err(OutOfMemory)));
   }
 }
 

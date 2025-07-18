@@ -9,8 +9,7 @@ name = "allocator"
 name = "types"
 
 [dependencies]
-aubystd = { version = "0.1.0", path = "..", features = ["libc", "debugging"] }
-futures = "0.3.31"
+aubystd = { version = "0.1.0", path = "..", features = ["libc"] }
+futures = { version = "0.3.31", default-features = false }
 libc = { version = "0.2.172", default-features = false }
-pollster = "*"
 thiserror = { version = "2.0.12", default-features = false }

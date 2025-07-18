@@ -1,14 +1,16 @@
-#![feature(more_qualified_paths)]
-#![feature(custom_inner_attributes)]
 
-#[allow(unused)]
-use aubystd::prelude::*;
+// core::include!("../../.cargo/prefix.rs");
+
+// #![feature(more_qualified_paths)]
+// #![feature(custom_inner_attributes)]
+// #![no_std]
 
 use aubystd::{
   alloc::{
-    allocator::{ArenaAllocator, ForeignAllocator, Malloc}, slice_dst, strategy::{Rc, RcStrategy, Unique, UniqueStrategy}, SliceAllocator, UnsizedMaybeUninit
-  }, zerocopy::FromZeros
+    Allocator, SliceAllocator, SliceDst, UnsizedMaybeUninit, allocator::{ArenaAllocator, ForeignAllocator, Malloc}, slice_dst, strategy::{Rc, RcStrategy, Unique, UniqueStrategy}
+  }, prelude::UninitStrategyHandleExt, zerocopy::FromZeros
 };
+use scratchpad::{block_on, println};
 
 use core::{
   cell::{Cell, RefCell, UnsafeCell}, fmt::{Debug, Display}, mem::MaybeUninit, pin::Pin, task::{Context, Poll}
@@ -236,7 +238,6 @@ async fn main_inner() {
   println!("the answer {}...", future.await);
 }
 
-fn main() -> ! {
-  pollster::block_on(main_inner());
-  unsafe { libc::exit(0) }
+fn main() {
+  block_on(main_inner());
 }

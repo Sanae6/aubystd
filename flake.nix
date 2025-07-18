@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     fenix = {
       url = "github:nix-community/fenix";
@@ -25,7 +25,7 @@
       in
         with pkgs; {
           formatter = alejandra;
-          devShells.default = mkShell  {
+          devShells.default = mkShell {
             buildInputs = [
               pkgs.fenix.complete.toolchain
               lldb
