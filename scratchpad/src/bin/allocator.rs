@@ -1,10 +1,3 @@
-
-// core::include!("../../.cargo/prefix.rs");
-
-// #![feature(more_qualified_paths)]
-// #![feature(custom_inner_attributes)]
-// #![no_std]
-
 use aubystd::{
   alloc::{
     Allocator, SliceAllocator, SliceDst, UnsizedMaybeUninit, allocator::{ArenaAllocator, ForeignAllocator, Malloc}, slice_dst, strategy::{Rc, RcStrategy, Unique, UniqueStrategy}

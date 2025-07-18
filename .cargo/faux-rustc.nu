@@ -54,7 +54,7 @@ def --wrapped main [rustc: string, ...args] {
         $inner_attrs | str join (char nl) | save -fr $new_input
         # open $new_input -r | lines | print
         let prefix = $prefix_path | open -r | str replace -ar "\n" "" | save -ar $new_input
-        open $new_input -r | lines | print
+        # open $new_input -r | lines | print
         $original | skip ($inner_attrs | length) | save -ar $new_input 
         # open $new_input -r | lines | print
         
@@ -69,12 +69,13 @@ def --wrapped main [rustc: string, ...args] {
             if (($x | get rendered -i) != null) {
                 mut y = $x;
                 $y.rendered = $x.rendered | str replace -a $new_input $args_filename
-                $y.rendered
+                $y
             } else {
-                null
+                $x
             }
-        } | print
+        } | each {to json -r | print -e};
         rm -f $new_input
+        exit $output.exit_code
     } catch {|e|
         rm -f $new_input
         $e.rendered | print
