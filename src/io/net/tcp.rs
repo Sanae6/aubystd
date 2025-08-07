@@ -6,7 +6,10 @@ pub trait TcpClient: Io {
   type Error: Error;
 
   // todo: cancellation???
-  async fn open_connection<'a>(&'a self, address: SocketAddr) -> Result<impl TcpSocket + 'a, Self::Error>;
+  async fn open_connection<'a>(
+    &'a self,
+    address: SocketAddr,
+  ) -> Result<impl TcpSocket + 'a, Self::Error>;
 }
 
 pub trait TcpServer: Io {
@@ -18,7 +21,7 @@ pub trait TcpServer: Io {
 pub trait TcpListener {
   type Error: Error;
 
-  async fn accept(&mut self)-> Result<impl TcpSocket + StreamRead + StreamWrite, Self::Error>;
+  async fn accept(&mut self) -> Result<impl TcpSocket + StreamRead + StreamWrite, Self::Error>;
 }
 
 pub trait TcpSocket {

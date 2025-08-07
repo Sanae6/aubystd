@@ -1,12 +1,23 @@
+#![feature(more_qualified_paths)]
+
 use aubystd::{
   alloc::{
-    Allocator, SliceAllocator, SliceDst, UnsizedMaybeUninit, allocator::{ArenaAllocator, ForeignAllocator, Malloc}, slice_dst, strategy::{Rc, RcStrategy, Unique, UniqueStrategy}
-  }, prelude::UninitStrategyHandleExt, zerocopy::FromZeros
+    Allocator, SliceAllocator, SliceDst, UnsizedMaybeUninit,
+    allocator::{ArenaAllocator, ForeignAllocator, Malloc},
+    slice_dst,
+    strategy::{Rc, RcStrategy, Unique, UniqueStrategy},
+  },
+  prelude::UninitStrategyHandleExt,
+  zerocopy::FromZeros,
 };
 use scratchpad::{block_on, println};
 
 use core::{
-  cell::{Cell, RefCell, UnsafeCell}, fmt::{Debug, Display}, mem::MaybeUninit, pin::Pin, task::{Context, Poll}
+  cell::{Cell, RefCell, UnsafeCell},
+  fmt::{Debug, Display},
+  mem::MaybeUninit,
+  pin::Pin,
+  task::{Context, Poll},
 };
 
 #[slice_dst(header = AHeader, derive(FromZeros))]
@@ -93,7 +104,10 @@ async fn main_inner() {
 
   println!("{}", handle);
 
-  let handle = allocator.take::<UniqueStrategy>([1, 2, 3, 4]).await.unwrap();
+  let handle = allocator
+    .take::<UniqueStrategy>([1, 2, 3, 4])
+    .await
+    .unwrap();
 
   println!("{:?}", handle);
 
@@ -121,7 +135,8 @@ async fn main_inner() {
   let handle: Unique<A<[u8]>> = handle;
   println!("{}", handle);
 
-  let mut handle: Unique<UnsizedMaybeUninit<A<[u8]>>> = allocator.reserve_slice::<UniqueStrategy>(5).await.unwrap();
+  let mut handle: Unique<UnsizedMaybeUninit<A<[u8]>>> =
+    allocator.reserve_slice::<UniqueStrategy>(5).await.unwrap();
 
   let handle = unsafe {
     handle.header.write(<A<[u8]> as SliceDst>::Header {
@@ -138,7 +153,8 @@ async fn main_inner() {
   let handle: Unique<A<[u8]>> = handle;
   println!("{}", handle);
 
-  let mut handle: Unique<UnsizedMaybeUninit<A<D>>> = allocator.reserve_slice::<UniqueStrategy>(5).await.unwrap();
+  let mut handle: Unique<UnsizedMaybeUninit<A<D>>> =
+    allocator.reserve_slice::<UniqueStrategy>(5).await.unwrap();
 
   let handle = unsafe {
     handle.header.write(<A<D> as SliceDst>::Header {

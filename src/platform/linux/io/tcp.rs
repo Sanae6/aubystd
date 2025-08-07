@@ -1,11 +1,13 @@
 use core::net::SocketAddr;
-
-use crate::{
-  io::net::tcp::{TcpClient, TcpSocket}, platform::linux::io::{FileDescriptor, LinuxError}
-};
 use syscalls::{Sysno, syscall};
 
-use super::LinuxIo;
+use crate::{
+  io::net::tcp::{TcpClient, TcpSocket},
+  platform::linux::{
+    FileDescriptor,
+    io::{LinuxError, LinuxIo},
+  },
+};
 
 impl TcpClient for LinuxIo {
   type Error = LinuxError;
@@ -24,7 +26,7 @@ impl TcpClient for LinuxIo {
       )
     }
     .map_err(LinuxError)?;
-    
+
     todo!("register on io worker thread")
   }
 }

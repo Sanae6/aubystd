@@ -1,5 +1,7 @@
 use core::{
-  alloc::Layout, marker::variance, ptr::{NonNull, null_mut}
+  alloc::Layout,
+  marker::variance,
+  ptr::{NonNull, null_mut},
 };
 
 use crate::alloc::strategy::StrategyVariance;

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 aubystd-macros = { version = "0.1.0", path = "macros" }
+bitflags = { version = "2.9.1", features = ["core"] }
 libc = { version = "0.2.172", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }

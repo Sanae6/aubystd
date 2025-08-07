@@ -8,6 +8,7 @@
 #![feature(more_maybe_bounds, trusted_len, prelude_import)]
 #![feature(never_type, layout_for_ptr, deref_pure_trait, sync_unsafe_cell)]
 #![feature(lang_items)]
+#![feature(linkage)]
 #![cfg_attr(test, feature(assert_matches))]
 
 #[macro_use]
@@ -16,6 +17,7 @@ pub extern crate core;
 
 pub mod alloc;
 pub mod futures;
+pub(crate) mod internal;
 pub mod io;
 pub mod num;
 pub mod platform;
@@ -29,7 +31,8 @@ pub use zerocopy;
 
 pub mod prelude {
   pub use crate::alloc::{
-    Allocator, SliceDst, strategy::{PinStrategyHandle, RC, Rc, StrategyHandle, UNIQUE, UninitStrategyHandleExt, Unique}
+    Allocator, SliceDst,
+    strategy::{PinStrategyHandle, Rc, StrategyHandle, UninitStrategyHandleExt, Unique},
   };
   #[doc(hidden)]
   pub(crate) use aubystd_macros::aubystd_bikeshed_name;

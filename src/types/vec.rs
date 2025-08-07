@@ -1,5 +1,8 @@
 use core::{
-  array, marker::PhantomData, mem::MaybeUninit, ops::{Deref, DerefMut}
+  array,
+  marker::PhantomData,
+  mem::MaybeUninit,
+  ops::{Deref, DerefMut},
 };
 
 use aubystd_macros::slice_dst;
@@ -66,7 +69,9 @@ impl<T, V: AsRef<[MaybeUninit<T>]> + ?Sized> AsRef<[T]> for BaseVec<T, V> {
   }
 }
 
-impl<T, V: AsRef<[MaybeUninit<T>]> + AsMut<[MaybeUninit<T>]> + ?Sized> AsMut<[T]> for BaseVec<T, V> {
+impl<T, V: AsRef<[MaybeUninit<T>]> + AsMut<[MaybeUninit<T>]> + ?Sized> AsMut<[T]>
+  for BaseVec<T, V>
+{
   fn as_mut(&mut self) -> &mut [T] {
     self
   }
@@ -77,7 +82,9 @@ impl<T, V: AsRef<[MaybeUninit<T>]> + ?Sized> AsRef<Self> for BaseVec<T, V> {
   }
 }
 
-impl<T, V: AsRef<[MaybeUninit<T>]> + AsMut<[MaybeUninit<T>]> + ?Sized> AsMut<Self> for BaseVec<T, V> {
+impl<T, V: AsRef<[MaybeUninit<T>]> + AsMut<[MaybeUninit<T>]> + ?Sized> AsMut<Self>
+  for BaseVec<T, V>
+{
   fn as_mut(&mut self) -> &mut Self {
     self
   }

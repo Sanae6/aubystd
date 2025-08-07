@@ -2,7 +2,11 @@ pub mod arena;
 pub mod foreign;
 
 use core::{
-  alloc::{Layout, LayoutError}, error::Error, mem::MaybeUninit, pin::Pin, ptr
+  alloc::{Layout, LayoutError},
+  error::Error,
+  mem::MaybeUninit,
+  pin::Pin,
+  ptr,
 };
 
 #[doc(inline)]
@@ -25,7 +29,9 @@ pub trait Allocator<'s, T: 's> {
   type Error: Error;
 
   /// Allocates an uninitialized handle
-  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::UninitHandle<'s, MaybeUninit<T>>, Self::Error>
+  async fn reserve_item<S: Strategy>(
+    &'s self,
+  ) -> Result<S::UninitHandle<'s, MaybeUninit<T>>, Self::Error>
   where
     S::Data<'s, MaybeUninit<T>>: Sized;
 
@@ -35,7 +41,11 @@ pub trait Allocator<'s, T: 's> {
   {
     let item = self.reserve_item::<S>().await?;
     //
-    unsafe { S::UninitHandle::as_value_ptr(&item).cast::<T>().write(value) };
+    unsafe {
+      S::UninitHandle::as_value_ptr(&item)
+        .cast::<T>()
+        .write(value)
+    };
     // Safety: item was initialized above
     Ok(unsafe { S::UninitHandle::assume_init(item).into() })
   }
@@ -70,7 +80,9 @@ pub trait SliceAllocator<'s, T: SliceDst + ?Sized + 's> {
       let ptr = S::UninitHandle::as_value_ptr(&slice);
       ptr.cast::<T::Header>().write_bytes(0, 1);
       let (ptr, _) = ptr.to_raw_parts();
-      T::addr_of_slice(ptr::from_raw_parts_mut(ptr, length)).cast::<T::Element>().write_bytes(0, length);
+      T::addr_of_slice(ptr::from_raw_parts_mut(ptr, length))
+        .cast::<T::Element>()
+        .write_bytes(0, length);
     };
     Ok(unsafe { S::UninitHandle::assume_init(slice) })
   }
@@ -88,7 +100,9 @@ pub trait LayoutAllocator {
   // S::Data<'s, [MaybeUninit<u8>]>: Pointee<Metadata = usize>;
 }
 
-pub fn calculate_layout_for_dst<T: SliceDst + ?Sized>(element_count: usize) -> Result<Layout, LayoutError> {
+pub fn calculate_layout_for_dst<T: SliceDst + ?Sized>(
+  element_count: usize,
+) -> Result<Layout, LayoutError> {
   let header = Layout::new::<T::Header>();
   let array = Layout::array::<T::Element>(element_count)?;
   Layout::extend(&header, array).map(|tuple| tuple.0.pad_to_align())

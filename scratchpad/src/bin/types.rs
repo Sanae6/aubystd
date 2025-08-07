@@ -1,10 +1,14 @@
-use aubystd::{alloc::{strategy::UniqueStrategy, vec::Vec, ForeignAllocator, GrowthStrategy, Malloc}};
+use aubystd::alloc::{
+  ForeignAllocator, GrowthStrategy, Malloc, strategy::UniqueStrategy, vec::Vec,
+};
 use scratchpad::{block_on, println};
 
 async fn main_inner() {
   let allocator = ForeignAllocator::new(Malloc);
   let mut handle =
-    Vec::<u32, UniqueStrategy, _>::with_capacity(&allocator, GrowthStrategy::Exponential, 2).await.unwrap();
+    Vec::<u32, UniqueStrategy, _>::with_capacity(&allocator, GrowthStrategy::Exponential, 2)
+      .await
+      .unwrap();
   handle.push(1).unwrap();
   handle.push(2).unwrap();
   assert_eq!(handle.push(3), Err(3));

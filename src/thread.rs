@@ -2,12 +2,23 @@ use core::fmt::Debug;
 
 use thiserror::Error;
 
-pub trait Threading {
-  fn spawn<'a>(&'a self, stack_size: u32, func: impl FnOnce() + Send + Sync + 'a) -> ThreadHandle<'a>;
+use crate::alloc::strategy::Arc;
+
+pub unsafe trait Threading {
+  async fn spawn<F: FnOnce(&dyn ThreadParker) + Send + Sync + 'static>(
+    &'static self,
+    stack_size: usize,
+    func: F,
+  ) -> Arc<'static, dyn ThreadHandle>;
 }
-pub trait ThreadHandleInner {
+
+pub trait ThreadParker {
+  fn park(&self);
+}
+
+pub trait ThreadHandle {
   fn id(&self) -> usize;
-  fn wake(&self) -> Result<(), ThreadUnresponsive>;
+  fn unpark(&self) -> Result<(), ThreadUnresponsive>;
 }
 
 #[aubystd_bikeshed_name("thread inactive")]
@@ -16,7 +27,5 @@ pub trait ThreadHandleInner {
 pub struct ThreadUnresponsive {
   reason: &'static str,
 }
-
-pub struct ThreadHandle<'a>(Unique<'a, dyn ThreadHandleInner>);
 
 pub struct ThreadId {}

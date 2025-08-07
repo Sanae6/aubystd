@@ -21,6 +21,3 @@ impl Io for LinuxIo {}
 #[non_exhaustive]
 #[error("Unhandled error: {0}")]
 pub struct LinuxError(Errno);
-
-type MaybeFileDescriptor = i32;
-type FileDescriptor = u32;

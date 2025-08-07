@@ -1,8 +1,12 @@
 [build]
 rustc-wrapper = ".cargo/faux-rustc.nu"
+# target = "x86_64-unknown-linux-none"
+
 [profile.dev]
 panic = "abort"
+[profile.release]
+panic = "abort"
 
-# [unstable]
+[unstable]
 # mtime-on-use = true
 # build-std = ["core"]

@@ -1,7 +1,7 @@
 use core::cmp;
 
-pub mod vec;
 pub mod string;
+pub mod vec;
 
 pub enum GrowthStrategy {
   /// Grow the capacity of the [Vec] by exactly the amount that is needed

@@ -1,9 +1,14 @@
 use core::{
-  alloc::Layout, cell::{Cell, SyncUnsafeCell, UnsafeCell}, mem::MaybeUninit, ops::Deref, ptr
+  alloc::Layout,
+  cell::{Cell, SyncUnsafeCell, UnsafeCell},
+  mem::MaybeUninit,
+  ops::Deref,
+  ptr,
 };
 
 use crate::alloc::{
-  FreeVtable, LayoutAllocator, OutOfMemory, SliceAllocator, SliceDst, UnsizedMaybeUninit, strategy::Strategy
+  FreeVtable, LayoutAllocator, OutOfMemory, SliceAllocator, SliceDst, UnsizedMaybeUninit,
+  strategy::Strategy,
 };
 
 use super::calculate_layout_for_dst;
@@ -15,7 +20,10 @@ pub struct ArenaAllocator<A: UnsafeCellBuffer> {
 
 impl<A: UnsafeCellBuffer> ArenaAllocator<A> {
   pub fn new(data: A) -> Self {
-    Self { head: 0.into(), data }
+    Self {
+      head: 0.into(),
+      data,
+    }
   }
 
   pub fn len(&self) -> usize {
@@ -26,9 +34,19 @@ impl<A: UnsafeCellBuffer> ArenaAllocator<A> {
     self.len() - self.head.get()
   }
 
-  fn fetch_head_ptr<'s, S: Strategy>(&'s self, layout: Layout) -> Result<ptr::NonNull<()>, OutOfMemory> {
+  fn fetch_head_ptr<'s, S: Strategy>(
+    &'s self,
+    layout: Layout,
+  ) -> Result<ptr::NonNull<()>, OutOfMemory> {
     // Safety: buffer ptr + head < buffer end ptr, never overflows
-    let alignment_offset = unsafe { self.data.get().cast::<u8>().add(self.head.get()).align_offset(layout.align()) };
+    let alignment_offset = unsafe {
+      self
+        .data
+        .get()
+        .cast::<u8>()
+        .add(self.head.get())
+        .align_offset(layout.align())
+    };
 
     let new_head = self
       .head
@@ -52,11 +70,15 @@ impl<A: UnsafeCellBuffer> ArenaAllocator<A> {
 impl<'s, T: 's, A: UnsafeCellBuffer> Allocator<'s, T> for ArenaAllocator<A> {
   type Error = OutOfMemory;
 
-  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::UninitHandle<'s, MaybeUninit<T>>, OutOfMemory>
+  async fn reserve_item<S: Strategy>(
+    &'s self,
+  ) -> Result<S::UninitHandle<'s, MaybeUninit<T>>, OutOfMemory>
   where
     S::Data<'s, MaybeUninit<T>>: Sized,
   {
-    let ptr = self.fetch_head_ptr::<S>(Layout::new::<S::Data<'s, MaybeUninit<T>>>())?.cast();
+    let ptr = self
+      .fetch_head_ptr::<S>(Layout::new::<S::Data<'s, MaybeUninit<T>>>())?
+      .cast();
 
     unsafe { S::initialize_data(FreeVtable::new_empty(), ptr.as_ptr()) };
 
@@ -64,7 +86,9 @@ impl<'s, T: 's, A: UnsafeCellBuffer> Allocator<'s, T> for ArenaAllocator<A> {
   }
 }
 
-impl<'s, T: SliceDst + ?Sized + 's, A: UnsafeCellBuffer> SliceAllocator<'s, T> for ArenaAllocator<A> {
+impl<'s, T: SliceDst + ?Sized + 's, A: UnsafeCellBuffer> SliceAllocator<'s, T>
+  for ArenaAllocator<A>
+{
   type Error = OutOfMemory;
   async fn reserve_slice<S: Strategy>(
     &'s self,
@@ -73,10 +97,12 @@ impl<'s, T: SliceDst + ?Sized + 's, A: UnsafeCellBuffer> SliceAllocator<'s, T> f
   where
     S::Data<'s, UnsizedMaybeUninit<T>>: SliceDst,
   {
-    let layout = calculate_layout_for_dst::<S::Data<'s, UnsizedMaybeUninit<T>>>(length).map_err(|_| OutOfMemory)?;
+    let layout = calculate_layout_for_dst::<S::Data<'s, UnsizedMaybeUninit<T>>>(length)
+      .map_err(|_| OutOfMemory)?;
 
     let ptr = self.fetch_head_ptr::<S>(layout)?;
-    let ptr: ptr::NonNull<S::Data<'s, UnsizedMaybeUninit<T>>> = ptr::NonNull::from_raw_parts(ptr, length);
+    let ptr: ptr::NonNull<S::Data<'s, UnsizedMaybeUninit<T>>> =
+      ptr::NonNull::from_raw_parts(ptr, length);
 
     unsafe { S::initialize_data(FreeVtable::new_empty(), ptr.as_ptr()) };
 
@@ -94,7 +120,11 @@ impl<A: UnsafeCellBuffer> LayoutAllocator for ArenaAllocator<A> {
   where
     S::Data<'s, ()>: Sized,
   {
-    let new_layout = Layout::new::<S::Data<'s, ()>>().extend(layout).map_err(|_| OutOfMemory)?.0.pad_to_align();
+    let new_layout = Layout::new::<S::Data<'s, ()>>()
+      .extend(layout)
+      .map_err(|_| OutOfMemory)?
+      .0
+      .pad_to_align();
     let ptr = self.fetch_head_ptr::<S>(new_layout)?;
     let ptr: ptr::NonNull<S::Data<'s, UnsizedMaybeUninit<[MaybeUninit<u8>]>>> =
       ptr::NonNull::from_raw_parts(ptr, new_layout.size());
@@ -134,10 +164,14 @@ mod tests {
   use core::{cell::UnsafeCell, mem::MaybeUninit};
 
   use crate::alloc::{
-    ForeignAllocator, Malloc, SliceAllocator, UnsafeCellBuffer, allocator::{ArenaAllocator, OutOfMemory}, strategy::{Strategy, Unique, UniqueStrategy}
+    ForeignAllocator, Malloc, SliceAllocator, UnsafeCellBuffer,
+    allocator::{ArenaAllocator, OutOfMemory},
+    strategy::{Strategy, Unique, UniqueStrategy},
   };
 
-  pub async fn test_arena<S: Strategy, T: 'static>(count: usize) -> ArenaAllocator<impl UnsafeCellBuffer>
+  pub async fn test_arena<S: Strategy, T: 'static>(
+    count: usize,
+  ) -> ArenaAllocator<impl UnsafeCellBuffer>
   where
     S::Data<'static, T>: Sized,
   {
@@ -145,8 +179,10 @@ mod tests {
     use alloc::boxed::Box;
     let allocator = Box::leak(Box::new(ForeignAllocator::new(Malloc)));
 
-    let buffer: Unique<UnsafeCell<[MaybeUninit<u8>]>> =
-      allocator.from_zeros::<UniqueStrategy>(size_of::<S::Data<'static, T>>() * count).await.unwrap();
+    let buffer: Unique<UnsafeCell<[MaybeUninit<u8>]>> = allocator
+      .from_zeros::<UniqueStrategy>(size_of::<S::Data<'static, T>>() * count)
+      .await
+      .unwrap();
 
     ArenaAllocator::new(buffer)
   }

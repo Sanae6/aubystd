@@ -1,9 +1,13 @@
 use core::{
-  alloc::Layout, fmt::Debug, mem, ops::{Deref, DerefMut}
+  alloc::Layout,
+  fmt::Debug,
+  mem,
+  ops::{Deref, DerefMut},
 };
 
 use crate::{
-  alloc::{GrowthStrategy, SliceAllocator, UnsizedMaybeUninit, strategy::Strategy}, types::vec::{BaseVecHeader, SliceVec}
+  alloc::{GrowthStrategy, SliceAllocator, UnsizedMaybeUninit, strategy::Strategy},
+  types::vec::{BaseVecHeader, SliceVec},
 };
 
 #[repr(C)]
@@ -22,15 +26,21 @@ where
 {
   pub async fn new(allocator: &'a A, strategy: GrowthStrategy) -> Result<Self, A::Error>
   where
-    S::UninitHandle<'a, UnsizedMaybeUninit<SliceVec<T>>>: DerefMut<Target = UnsizedMaybeUninit<SliceVec<T>>>,
+    S::UninitHandle<'a, UnsizedMaybeUninit<SliceVec<T>>>:
+      DerefMut<Target = UnsizedMaybeUninit<SliceVec<T>>>,
     S::Data<'a, UnsizedMaybeUninit<SliceVec<T>>>: SliceDst,
   {
     Self::with_capacity(allocator, strategy, 0).await
   }
 
-  pub async fn with_capacity(allocator: &'a A, strategy: GrowthStrategy, capacity: usize) -> Result<Self, A::Error>
+  pub async fn with_capacity(
+    allocator: &'a A,
+    strategy: GrowthStrategy,
+    capacity: usize,
+  ) -> Result<Self, A::Error>
   where
-    S::UninitHandle<'a, UnsizedMaybeUninit<SliceVec<T>>>: DerefMut<Target = UnsizedMaybeUninit<SliceVec<T>>>,
+    S::UninitHandle<'a, UnsizedMaybeUninit<SliceVec<T>>>:
+      DerefMut<Target = UnsizedMaybeUninit<SliceVec<T>>>,
     S::Data<'a, UnsizedMaybeUninit<SliceVec<T>>>: SliceDst,
   {
     let mut handle: S::UninitHandle<'a, UnsizedMaybeUninit<SliceVec<T>>> =
@@ -49,11 +59,15 @@ where
 impl<'a, T: 'a, S: Strategy, A: SliceAllocator<'a, SliceVec<T>>> Vec<'a, T, S, A>
 where
   S::Handle<'a, SliceVec<T>>: DerefMut<Target = SliceVec<T>>,
-  S::UninitHandle<'a, UnsizedMaybeUninit<SliceVec<T>>>: DerefMut<Target = UnsizedMaybeUninit<SliceVec<T>>>,
+  S::UninitHandle<'a, UnsizedMaybeUninit<SliceVec<T>>>:
+    DerefMut<Target = UnsizedMaybeUninit<SliceVec<T>>>,
   S::Data<'a, UnsizedMaybeUninit<SliceVec<T>>>: SliceDst,
 {
   pub async fn grow(&mut self, additional: usize) -> Result<(), A::Error> {
-    let capacity = self.growth_strategy.calculate_new_capacity(self.inner.len(), additional).expect("vec is full");
+    let capacity = self
+      .growth_strategy
+      .calculate_new_capacity(self.inner.len(), additional)
+      .expect("vec is full");
 
     self.resize(capacity).await
   }
@@ -67,7 +81,10 @@ where
 
     let new = unsafe {
       // Safety: same layout, non-overlapping ptrs
-      old_ptr.cast::<u8>().copy_to_nonoverlapping(new_ptr.cast(), Layout::for_value_raw(old_ptr.cast_const()).size());
+      old_ptr.cast::<u8>().copy_to_nonoverlapping(
+        new_ptr.cast(),
+        Layout::for_value_raw(old_ptr.cast_const()).size(),
+      );
       // Safety: initialized by copying from self
       S::UninitHandle::assume_init(new)
     };

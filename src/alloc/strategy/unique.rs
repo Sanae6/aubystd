@@ -1,5 +1,12 @@
 use core::{
-  alloc::Layout, borrow::{Borrow, BorrowMut}, fmt::{self, Debug, Display}, marker::{CoercePointee, variance}, mem::{forget, offset_of}, ops::{Deref, DerefMut, DerefPure}, pin::Pin, ptr::{self, Pointee}
+  alloc::Layout,
+  borrow::{Borrow, BorrowMut},
+  fmt::{self, Debug, Display},
+  marker::{CoercePointee, variance},
+  mem::{forget, offset_of},
+  ops::{Deref, DerefMut, DerefPure},
+  pin::Pin,
+  ptr::{self, Pointee},
 };
 
 use aubystd_macros::slice_dst;
@@ -10,7 +17,6 @@ use super::{FreeVtable, Strategy, StrategyHandle, UninitStrategyHandleExt};
 
 #[derive(Default)]
 pub struct UniqueStrategy;
-pub const UNIQUE: UniqueStrategy = UniqueStrategy;
 
 #[slice_dst(header = UniqueDataHeader)]
 #[doc(hidden)]
@@ -26,7 +32,10 @@ impl Strategy for UniqueStrategy {
   type UninitHandle<'a, T: UninitType + ?Sized + 'a> = Unique<'a, T>;
 
   /// Safety: data_ptr must be aligned and point to valid memory
-  unsafe fn initialize_data<'a, T: ?Sized + 'a>(free_vtable: FreeVtable<'a>, data_ptr: *mut Self::Data<'a, T>) {
+  unsafe fn initialize_data<'a, T: ?Sized + 'a>(
+    free_vtable: FreeVtable<'a>,
+    data_ptr: *mut Self::Data<'a, T>,
+  ) {
     assert_alignment(data_ptr);
     // Safety: data_ptr is valid and properly aligned
     unsafe {
@@ -34,7 +43,9 @@ impl Strategy for UniqueStrategy {
     }
   }
 
-  fn construct_handle<'a, T: ?Sized + 'a>(ptr: ptr::NonNull<UniqueData<'a, T>>) -> Self::Handle<'a, T> {
+  fn construct_handle<'a, T: ?Sized + 'a>(
+    ptr: ptr::NonNull<UniqueData<'a, T>>,
+  ) -> Self::Handle<'a, T> {
     Unique(ptr, variance())
   }
 }
@@ -51,7 +62,9 @@ impl<'a, T> Unique<'a, T> {
       // Safety: ptr's layout is already known to be safe to use
       let layout = Layout::for_value_raw(self.0.as_ptr().cast_const());
       // Safety: upheld by previous statements and full ownership of `self`
-      (&raw const (*self.0.as_ptr()).free_vtable).read().free(self.0, layout);
+      (&raw const (*self.0.as_ptr()).free_vtable)
+        .read()
+        .free(self.0, layout);
       data.value
     }
   }
@@ -76,13 +89,17 @@ impl<'a, T: ?Sized + Pointee> StrategyHandle<'a, T> for Unique<'a, T> {
   }
 
   unsafe fn from_value_ptr(ptr: *mut T) -> Self {
-    let (ptr, metadata) = unsafe { ptr.byte_sub(offset_of!(UniqueData<'static, ()>, value)) }.to_raw_parts();
+    let (ptr, metadata) =
+      unsafe { ptr.byte_sub(offset_of!(UniqueData<'static, ()>, value)) }.to_raw_parts();
     let ptr = ptr::NonNull::from_raw_parts(ptr::NonNull::new(ptr).unwrap(), metadata);
     Unique(ptr, variance())
   }
 
   // Casts the smart pointer to `U`
-  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(metadata: T::Metadata, this: Self) -> Self::Cast<U> {
+  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(
+    metadata: T::Metadata,
+    this: Self,
+  ) -> Self::Cast<U> {
     let (ptr, _) = this.0.to_raw_parts();
     let new_value = ptr::NonNull::<UniqueData<'a, U>>::from_raw_parts(ptr as _, metadata);
     unsafe {
@@ -144,7 +161,9 @@ impl<'a, T: ?Sized> Drop for Unique<'a, T> {
       self.0.drop_in_place();
       // Safety: ptr's layout is already known to be safe to use
       let layout = Layout::for_value_raw(self.0.as_ptr() as *const _);
-      (&raw mut (*self.0.as_ptr()).free_vtable).read().free(self.0, layout);
+      (&raw mut (*self.0.as_ptr()).free_vtable)
+        .read()
+        .free(self.0, layout);
     }
   }
 }

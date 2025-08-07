@@ -1,7 +1,12 @@
 use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{
-  DeriveInput, GenericParam, Ident, Lifetime, Token, Type, parse::{Parse, ParseStream, Parser}, parse_macro_input, parse_quote, punctuated::Punctuated, spanned::Spanned, visit::Visit
+  DeriveInput, GenericParam, Ident, Lifetime, Token, Type,
+  parse::{Parse, ParseStream, Parser},
+  parse_macro_input, parse_quote,
+  punctuated::Punctuated,
+  spanned::Spanned,
+  visit::Visit,
 };
 
 type MetaPunct = Punctuated<Metadata, Token![,]>;
@@ -13,14 +18,20 @@ fn find_meta_kv(meta: &MetaPunct, key: &str) -> syn::Result<Option<(Span, TokenT
         return if let Metadata::KeyValue { span, value, .. } = attr {
           Some(Ok((span.clone(), value.clone())))
         } else {
-          Some(Err(syn::Error::new(attr.key().span(), "expected key value pair")))
+          Some(Err(syn::Error::new(
+            attr.key().span(),
+            "expected key value pair",
+          )))
         };
       }
       None
     })
     .transpose()
 }
-fn find_meta_list(meta: &MetaPunct, key: &str) -> syn::Result<Option<(Span, Punctuated<TokenTree, Token![,]>)>> {
+fn find_meta_list(
+  meta: &MetaPunct,
+  key: &str,
+) -> syn::Result<Option<(Span, Punctuated<TokenTree, Token![,]>)>> {
   meta
     .iter()
     .find_map(|attr| {
@@ -38,15 +49,15 @@ fn find_meta_list(meta: &MetaPunct, key: &str) -> syn::Result<Option<(Span, Punc
 
 fn find_crate_name(meta: &MetaPunct) -> syn::Result<TokenStream> {
   Ok(
-    find_meta_kv(meta, "crate")?.map(|(_, value)| value.into_token_stream()).unwrap_or_else(|| {
-      match proc_macro_crate::crate_name("aubystd").unwrap() {
+    find_meta_kv(meta, "crate")?
+      .map(|(_, value)| value.into_token_stream())
+      .unwrap_or_else(|| match proc_macro_crate::crate_name("aubystd").unwrap() {
         proc_macro_crate::FoundCrate::Itself => quote!(crate),
         proc_macro_crate::FoundCrate::Name(name) => {
           let name = Ident::new(&name, Span::call_site());
           quote!(::#name)
         }
-      }
-    }),
+      }),
   )
 }
 
@@ -79,7 +90,9 @@ impl Parse for Metadata {
       let span = Span::join(&key.span(), value.span()).unwrap();
       Ok(Metadata::KeyValue { span, key, value })
     } else if let Ok(list) = input.step(|c| {
-      let x = c.group(Delimiter::Parenthesis).ok_or(syn::Error::new(Span::call_site(), "parens"))?;
+      let x = c
+        .group(Delimiter::Parenthesis)
+        .ok_or(syn::Error::new(Span::call_site(), "parens"))?;
       Ok((x.0.token_stream(), x.2))
     }) {
       let values = Punctuated::parse_terminated.parse2(list)?;
@@ -95,7 +108,10 @@ impl Parse for Metadata {
 }
 
 #[proc_macro_attribute]
-pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn slice_dst(
+  attr: proc_macro::TokenStream,
+  item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
   fn slice_dst_derive(
     attr: TokenStream,
     item: TokenStream,
@@ -130,7 +146,10 @@ pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
 
     let crate_name = find_crate_name(&meta)?;
 
-    let attrs: Vec<_> = attrs.into_iter().filter(|attr| !attr.path().is_ident("derive")).collect();
+    let attrs: Vec<_> = attrs
+      .into_iter()
+      .filter(|attr| !attr.path().is_ident("derive"))
+      .collect();
     let derive = find_meta_list(&meta, "derive")?.unwrap_or((Span::call_site(), parse_quote!()));
 
     let syn::Data::Struct(data_struct) = data else {
@@ -147,7 +166,10 @@ pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
         let mut repr = None;
         let result = attr
           .parse_nested_meta(|meta| {
-            if ["C", "transparent", "align", "packed"].iter().any(|ident| meta.path.is_ident(ident)) {
+            if ["C", "transparent", "align", "packed"]
+              .iter()
+              .any(|ident| meta.path.is_ident(ident))
+            {
               repr = Some(meta.path);
               Ok(())
             } else {
@@ -159,7 +181,11 @@ pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
       })
       .collect::<syn::Result<Vec<_>>>()?;
 
-    if reprs.len() == 0 || reprs.iter().all(|path| !path.is_ident("C") && !path.is_ident("transparent")) {
+    if reprs.len() == 0
+      || reprs
+        .iter()
+        .all(|path| !path.is_ident("C") && !path.is_ident("transparent"))
+    {
       return Err(syn::Error::new(
         ident.span(),
         "struct must be either repr(C) or repr(transparent)",
@@ -184,7 +210,12 @@ pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
         fields_unnamed.unnamed.into_iter(),
         FieldsKind::Unnamed,
       ),
-      syn::Fields::Unit => return Err(syn::Error::new(ident.span(), "unit structs cannot be slice DSTs")),
+      syn::Fields::Unit => {
+        return Err(syn::Error::new(
+          ident.span(),
+          "unit structs cannot be slice DSTs",
+        ));
+      }
     };
     // let fields = fields.map(|mut field| {
     //   field.vis = Visibility::Public(Pub(Span::call_site()));
@@ -204,8 +235,10 @@ pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
       1.. => {
         // Ident::new(&format!("{ident}Header"), Span::call_site()).to_token_stream()
 
-        let (_, header) =
-          find_meta_kv(&meta, "header")?.ok_or(syn::Error::new(Span::call_site(), "must have a header name"))?;
+        let (_, header) = find_meta_kv(&meta, "header")?.ok_or(syn::Error::new(
+          Span::call_site(),
+          "must have a header name",
+        ))?;
         header.to_token_stream()
       }
       // 1 => fields.clone().next().unwrap().ty.to_token_stream(),
@@ -262,8 +295,13 @@ pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
       unused_generics.visit_type(&last_ty);
       if !matches!(last_ty, Type::Slice(_)) && unused_generics.used_params.len() == 1 {
         for param_name in &unused_generics.used_params {
-          if let Some(param) = generics.type_params_mut().find(|param| param.ident == *param_name) {
-            param.bounds.push(parse_quote!(#crate_name::alloc::SliceDst));
+          if let Some(param) = generics
+            .type_params_mut()
+            .find(|param| param.ident == *param_name)
+          {
+            param
+              .bounds
+              .push(parse_quote!(#crate_name::alloc::SliceDst));
           }
         }
       };
@@ -275,8 +313,12 @@ pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
         .params
         .into_iter()
         .filter(|param| match param {
-          GenericParam::Lifetime(lifetime) => unused_generics.used_lifetimes.contains(&lifetime.lifetime),
-          GenericParam::Const(const_param) => unused_generics.used_params.contains(&const_param.ident),
+          GenericParam::Lifetime(lifetime) => {
+            unused_generics.used_lifetimes.contains(&lifetime.lifetime)
+          }
+          GenericParam::Const(const_param) => {
+            unused_generics.used_params.contains(&const_param.ident)
+          }
           GenericParam::Type(type_param) => unused_generics.used_params.contains(&type_param.ident),
         })
         .collect();
@@ -335,6 +377,9 @@ pub fn slice_dst(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
 
 /// For things that need to be named, but don't have a nice name yet
 #[proc_macro_attribute]
-pub fn aubystd_bikeshed_name(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn aubystd_bikeshed_name(
+  _attr: proc_macro::TokenStream,
+  item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
   item
 }

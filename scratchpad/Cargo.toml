@@ -3,13 +3,9 @@ name = "scratchpad"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "allocator"
-[[bin]]
-name = "types"
-
 [dependencies]
 aubystd = { version = "0.1.0", path = "..", features = ["libc"] }
 futures = { version = "0.3.31", default-features = false }
 libc = { version = "0.2.172", default-features = false }
+syscalls = { version = "0.6.18", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }

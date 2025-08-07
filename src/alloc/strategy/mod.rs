@@ -1,11 +1,20 @@
+mod arc;
 mod rc;
 mod unique;
 
+#[doc(inline)]
+pub use arc::*;
+#[doc(inline)]
 pub use rc::*;
+#[doc(inline)]
 pub use unique::*;
 
 use core::{
-  alloc::Layout, marker::PhantomInvariantLifetime, mem::MaybeUninit, pin::Pin, ptr::{NonNull, Pointee}
+  alloc::Layout,
+  marker::PhantomInvariantLifetime,
+  mem::MaybeUninit,
+  pin::Pin,
+  ptr::{NonNull, Pointee},
 };
 
 use crate::alloc::UnsizedMaybeUninit;
@@ -30,10 +39,15 @@ pub trait Strategy {
   type UninitHandle<'a, T: UninitType + ?Sized + 'a>: UninitStrategyHandleExt<'a, T, Init = Self::Handle<'a, T::Init>>;
 
   /// Safety: data_ptr must be aligned and point to valid memory
-  unsafe fn initialize_data<'a, T: ?Sized + 'a>(free_vtable: FreeVtable<'a>, data_ptr: *mut Self::Data<'a, T>);
+  unsafe fn initialize_data<'a, T: ?Sized + 'a>(
+    free_vtable: FreeVtable<'a>,
+    data_ptr: *mut Self::Data<'a, T>,
+  );
 
   /// Safety: data_ptr must be aligned and point to valid memory
-  fn construct_handle<'a, T: UninitType + ?Sized + 'a>(ptr: NonNull<Self::Data<'a, T>>) -> Self::UninitHandle<'a, T>;
+  fn construct_handle<'a, T: UninitType + ?Sized + 'a>(
+    ptr: NonNull<Self::Data<'a, T>>,
+  ) -> Self::UninitHandle<'a, T>;
 }
 
 pub trait StrategyHandle<'a, T: ?Sized + Pointee + 'a>: Sized {
@@ -47,7 +61,10 @@ pub trait StrategyHandle<'a, T: ?Sized + Pointee + 'a>: Sized {
     ptr
   }
 
-  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(medadata: T::Metadata, this: Self) -> Self::Cast<U>;
+  unsafe fn cast<U: ?Sized + Pointee<Metadata = T::Metadata>>(
+    medadata: T::Metadata,
+    this: Self,
+  ) -> Self::Cast<U>;
 }
 
 pub(super) type StrategyVariance<'t> = PhantomInvariantLifetime<'t>;

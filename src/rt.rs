@@ -14,8 +14,15 @@ impl Termination for () {}
 
 #[cfg(not(any(test, doctest)))]
 #[lang = "start"]
-fn start<T: Termination + 'static>(main: fn() -> T, _argc: isize, _argv: *const *const u8, _sigpipe: u8) -> isize {
-  // todo: handle argc, argv, sigpipe
+fn start<T: Termination + 'static>(
+  main: fn() -> T,
+  argc: isize,
+  argv: *const *const u8,
+  _sigpipe: u8,
+) -> isize {
+  use crate::platform::active;
+  active::rt::handle_args(argc, argv);
+  // todo: handle sigpipe
   main().value()
 }
 
@@ -41,7 +48,7 @@ fn panic_handler(info: &PanicInfo) -> ! {
         ptr.byte_add(s.len()).write(0)
       };
 
-      unsafe { libc::printf(ptr.as_ptr().cast()) };
+      unsafe { libc::write(libc::STDERR_FILENO, ptr.as_ptr().cast(), s.len()) };
 
       Ok(())
     }

@@ -1,8 +1,26 @@
 use core::{alloc::Layout, mem::MaybeUninit, ptr};
 
-use crate::alloc::{FreeVtable, LayoutAllocator, SliceAllocator, UnsizedMaybeUninit, strategy::Strategy};
+use crate::alloc::{
+  FreeVtable, LayoutAllocator, SliceAllocator, UnsizedMaybeUninit, strategy::Strategy,
+};
 
 use super::{OutOfMemory, calculate_layout_for_dst};
+
+#[cfg(feature = "libc")]
+mod malloc;
+/// todo: support windows
+#[cfg(unix)]
+pub mod mmap;
+#[cfg(any(feature = "alloc", test))]
+mod std_alloc;
+
+#[cfg(feature = "libc")]
+pub use malloc::Malloc;
+#[cfg(unix)]
+#[doc(inline)]
+pub use mmap::MemoryMapped;
+#[cfg(any(feature = "alloc", test))]
+pub use std_alloc::StdAlloc;
 
 /// A memory allocator adapter for C-style allocators (malloc and free).
 ///
@@ -23,12 +41,12 @@ pub struct ForeignAllocator<C: CStyleAllocator> {
 }
 
 impl<C: CStyleAllocator> ForeignAllocator<C> {
-  pub fn new(allocator: C) -> Self {
+  pub const fn new(allocator: C) -> Self {
     Self { allocator }
   }
 
   fn create_free_vtable<'a>(&'a self) -> FreeVtable<'a> {
-    FreeVtable::new(Self::free, &raw const *self as *mut Self)
+    FreeVtable::new(Self::free, &raw const self.allocator as *mut Self)
   }
 
   /// Safety contract:
@@ -36,11 +54,16 @@ impl<C: CStyleAllocator> ForeignAllocator<C> {
   /// - the allocation provided must point to an allocated block of memory
   unsafe fn free(context: *const (), allocation: *const (), layout: Layout) {
     // Safety: the context is never accessed mutably, so we can freely get an immutable reference.
-    let this = unsafe { context.cast::<Self>().as_ref().expect("null context was provided") };
+    let c_allocator = unsafe {
+      context
+        .cast::<C>()
+        .as_ref()
+        .expect("null context was provided")
+    };
 
     if let Some(ptr) = ptr::NonNull::new(allocation.cast_mut()) {
       // Safety: the allocation is a valid pointer
-      unsafe { this.allocator.free(ptr.cast(), layout) };
+      unsafe { c_allocator.free(ptr.cast(), layout) };
     }
   }
 }
@@ -48,7 +71,9 @@ impl<C: CStyleAllocator> ForeignAllocator<C> {
 impl<'s, T: 's, C: CStyleAllocator> Allocator<'s, T> for ForeignAllocator<C> {
   type Error = OutOfMemory;
 
-  async fn reserve_item<S: Strategy>(&'s self) -> Result<S::UninitHandle<'s, MaybeUninit<T>>, OutOfMemory>
+  async fn reserve_item<S: Strategy>(
+    &'s self,
+  ) -> Result<S::UninitHandle<'s, MaybeUninit<T>>, OutOfMemory>
   where
     S::Data<'s, MaybeUninit<T>>: Sized,
   {
@@ -64,7 +89,9 @@ impl<'s, T: 's, C: CStyleAllocator> Allocator<'s, T> for ForeignAllocator<C> {
   }
 }
 
-impl<'s, T: SliceDst + ?Sized + 's, C: CStyleAllocator> SliceAllocator<'s, T> for ForeignAllocator<C> {
+impl<'s, T: SliceDst + ?Sized + 's, C: CStyleAllocator> SliceAllocator<'s, T>
+  for ForeignAllocator<C>
+{
   type Error = OutOfMemory;
 
   async fn reserve_slice<S: Strategy>(
@@ -74,10 +101,12 @@ impl<'s, T: SliceDst + ?Sized + 's, C: CStyleAllocator> SliceAllocator<'s, T> fo
   where
     S::Data<'s, UnsizedMaybeUninit<T>>: SliceDst,
   {
-    let layout = calculate_layout_for_dst::<S::Data<'s, UnsizedMaybeUninit<T>>>(length).map_err(|_| OutOfMemory)?;
+    let layout = calculate_layout_for_dst::<S::Data<'s, UnsizedMaybeUninit<T>>>(length)
+      .map_err(|_| OutOfMemory)?;
 
     let data_ptr = self.allocator.alloc(layout)?;
-    let data_ptr: ptr::NonNull<S::Data<'s, UnsizedMaybeUninit<T>>> = ptr::NonNull::from_raw_parts(data_ptr, length);
+    let data_ptr: ptr::NonNull<S::Data<'s, UnsizedMaybeUninit<T>>> =
+      ptr::NonNull::from_raw_parts(data_ptr, length);
 
     // Safety: alloc only returns valid, well aligned pointers for the provided layout
     unsafe { S::initialize_data(self.create_free_vtable(), data_ptr.as_ptr()) };
@@ -97,7 +126,11 @@ impl<C: CStyleAllocator> LayoutAllocator for ForeignAllocator<C> {
     S::Data<'s, ()>: Sized,
     S::Data<'s, [MaybeUninit<u8>]>: ptr::Pointee<Metadata = usize>,
   {
-    let new_layout = Layout::new::<S::Data<'s, ()>>().extend(layout).map_err(|_| OutOfMemory)?.0.pad_to_align();
+    let new_layout = Layout::new::<S::Data<'s, ()>>()
+      .extend(layout)
+      .map_err(|_| OutOfMemory)?
+      .0
+      .pad_to_align();
     let data_ptr = self.allocator.alloc(new_layout)?;
     let data_ptr: ptr::NonNull<S::Data<'s, UnsizedMaybeUninit<[MaybeUninit<u8>]>>> =
       ptr::NonNull::from_raw_parts(data_ptr, new_layout.size());
@@ -105,45 +138,9 @@ impl<C: CStyleAllocator> LayoutAllocator for ForeignAllocator<C> {
     // Safety: alloc only returns valid, well aligned pointers for the provided layout
     unsafe { S::initialize_data(self.create_free_vtable(), data_ptr.as_ptr()) };
 
-    let handle: S::UninitHandle<'s, UnsizedMaybeUninit<[MaybeUninit<u8>]>> = S::construct_handle(data_ptr);
+    let handle: S::UninitHandle<'s, UnsizedMaybeUninit<[MaybeUninit<u8>]>> =
+      S::construct_handle(data_ptr);
     Ok(unsafe { S::UninitHandle::assume_init(handle) })
-  }
-}
-
-#[cfg(feature = "libc")]
-#[derive(Default)]
-pub struct Malloc;
-
-#[cfg(feature = "libc")]
-unsafe impl CStyleAllocator for Malloc {
-  fn alloc(&self, layout: Layout) -> Result<ptr::NonNull<u8>, OutOfMemory> {
-    let ptr = unsafe { libc::aligned_alloc(layout.align(), layout.size()) };
-    ptr::NonNull::new(ptr.cast::<u8>()).ok_or(OutOfMemory)
-  }
-
-  unsafe fn free(&self, ptr: ptr::NonNull<u8>, _layout: Layout) {
-    unsafe { libc::free(ptr.cast().as_ptr()) };
-  }
-}
-
-#[cfg(any(feature = "alloc", test))]
-extern crate alloc as rust_alloc;
-
-#[cfg(any(feature = "alloc", test))]
-#[derive(Default)]
-pub struct StdAlloc;
-
-#[cfg(any(feature = "alloc", test))]
-unsafe impl CStyleAllocator for StdAlloc {
-  fn alloc(&self, layout: Layout) -> Result<ptr::NonNull<u8>, OutOfMemory> {
-    let ptr = unsafe { rust_alloc::alloc::alloc(layout) };
-    ptr::NonNull::new(ptr).ok_or(OutOfMemory)
-  }
-
-  unsafe fn free(&self, ptr: ptr::NonNull<u8>, layout: Layout) {
-    unsafe {
-      rust_alloc::alloc::dealloc(ptr.as_ptr(), layout);
-    };
   }
 }
 
@@ -151,7 +148,8 @@ unsafe impl CStyleAllocator for StdAlloc {
 #[cfg(feature = "libc")]
 pub mod tests {
   use crate::alloc::{
-    allocator::{ForeignAllocator, StdAlloc}, strategy::UniqueStrategy
+    allocator::{ForeignAllocator, StdAlloc},
+    strategy::UniqueStrategy,
   };
 
   #[pollster::test]

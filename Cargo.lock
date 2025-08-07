@@ -7,6 +7,7 @@ name = "aubystd"
 version = "0.1.0"
 dependencies = [
  "aubystd-macros",
+ "bitflags",
  "libc",
  "num-traits",
  "pollster",
@@ -30,6 +31,15 @@ name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
+
+[[package]]
+name = "bitflags"
+version = "2.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
+dependencies = [
+ "rustc-std-workspace-core",
+]
 
 [[package]]
 name = "equivalent"
@@ -195,12 +205,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustc-std-workspace-core"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa9c45b374136f52f2d6311062c7146bff20fec063c3f5d46a410bd937746955"
+
+[[package]]
 name = "scratchpad"
 version = "0.1.0"
 dependencies = [
  "aubystd",
  "futures",
  "libc",
+ "syscalls",
  "thiserror",
 ]
 
