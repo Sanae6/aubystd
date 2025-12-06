@@ -7,6 +7,7 @@ use syscalls::{Errno, Sysno, syscall};
 enum LockState {
   Running,
   Waiting,
+  Exited,
 }
 
 pub struct LinuxThreadParker {
@@ -21,6 +22,10 @@ impl LinuxThreadParker {
   }
 
   pub fn sleep(&self) {
+    if self.value.load(Ordering::Relaxed) == LockState::Exited as _ {
+      return;
+    }
+
     self.value.store(LockState::Waiting as _, Ordering::Relaxed);
     loop {
       let result = unsafe {
@@ -41,13 +46,17 @@ impl LinuxThreadParker {
         return;
       }
 
-      if self.value.load(Ordering::Acquire) == LockState::Running as _ {
+      if self.value.load(Ordering::Acquire) != LockState::Waiting as _ {
         return;
       }
     }
   }
 
   pub fn wake(&self) {
+    if self.value.load(Ordering::Relaxed) == LockState::Exited as _ {
+      return;
+    }
+
     if let Ok(_) = self.value.compare_exchange(
       LockState::Waiting as _,
       LockState::Running as _,

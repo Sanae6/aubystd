@@ -5,7 +5,6 @@ use crate::io::{Io, StreamRead, StreamWrite};
 pub trait TcpClient: Io {
   type Error: Error;
 
-  // todo: cancellation???
   async fn open_connection<'a>(
     &'a self,
     address: SocketAddr,

@@ -1,5 +1,6 @@
 use core::{alloc::Layout, cell::SyncUnsafeCell, ffi::CStr, fmt::Debug, slice};
 
+use syscalls::{syscall, Sysno};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 use crate::alloc::{CStyleAllocator, MemoryMapped};
@@ -7,8 +8,14 @@ use crate::alloc::{CStyleAllocator, MemoryMapped};
 static PAGE_SIZE: SyncUnsafeCell<usize> = SyncUnsafeCell::new(0);
 
 pub fn get_page_size() -> usize {
-  // safety: so always valid because reading from a static, only written to on startup
+  // safety: always valid because reading from a static, only written to on startup
   unsafe { PAGE_SIZE.get().read() }
+}
+
+pub static PID: SyncUnsafeCell<libc::pid_t> = SyncUnsafeCell::new(0);
+pub fn get_pid() -> libc::pid_t {
+  // safety: always valid because reading from a static, only written to on startup
+  unsafe { PID.get().read() }
 }
 
 #[non_exhaustive]
@@ -143,5 +150,8 @@ extern "C" fn linux_handle_args(argc: isize, argv: *const *const u8) {
         }
       }
     }
+
+
+    PID.get().write(syscall!(Sysno::getpid).unwrap() as _);
   };
 }

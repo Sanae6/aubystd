@@ -1,7 +1,7 @@
 use aubystd::alloc::{
   ForeignAllocator, GrowthStrategy, Malloc, strategy::UniqueStrategy, vec::Vec,
 };
-use scratchpad::{block_on, println};
+use scratchpad::{block_on};
 
 async fn main_inner() {
   let allocator = ForeignAllocator::new(Malloc);

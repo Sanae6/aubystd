@@ -17,7 +17,8 @@ pub extern crate core;
 
 pub mod alloc;
 pub mod futures;
-pub(crate) mod internal;
+#[doc(hidden)]
+pub mod internal;
 pub mod io;
 pub mod num;
 pub mod platform;
@@ -34,6 +35,7 @@ pub mod prelude {
     Allocator, SliceDst,
     strategy::{PinStrategyHandle, Rc, StrategyHandle, UninitStrategyHandleExt, Unique},
   };
+  pub use crate::println;
   #[doc(hidden)]
   pub(crate) use aubystd_macros::aubystd_bikeshed_name;
   pub use core::prelude::rust_2024::*;

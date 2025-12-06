@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::alloc::strategy::Arc;
 
-pub unsafe trait Threading {
+pub trait Threading {
   async fn spawn<F: FnOnce(&dyn ThreadParker) + Send + Sync + 'static>(
     &'static self,
     stack_size: usize,
@@ -19,6 +19,7 @@ pub trait ThreadParker {
 pub trait ThreadHandle {
   fn id(&self) -> usize;
   fn unpark(&self) -> Result<(), ThreadUnresponsive>;
+  fn join(&self) -> Result<(), ThreadUnresponsive>;
 }
 
 #[aubystd_bikeshed_name("thread inactive")]
@@ -27,5 +28,3 @@ pub trait ThreadHandle {
 pub struct ThreadUnresponsive {
   reason: &'static str,
 }
-
-pub struct ThreadId {}

@@ -5,11 +5,12 @@ use crate::io::Io;
 
 mod tcp;
 
-pub struct LinuxIo;
+pub struct LinuxIo {
+  a: bool,
+}
 
 impl LinuxIo {
-  pub fn new() -> Self {
-    Self
+  fn instance() -> &'static Self {
   }
 }
 
